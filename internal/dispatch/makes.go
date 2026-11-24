@@ -40,6 +40,15 @@ import (
 // bead's, and makes nothing when it is read again: only what happens to the
 // thread after the close makes the next bead.
 //
+// That alone lets a thread that flaps (assigned, closed, assigned again)
+// mint a bead on every cycle, each with its comments and cards. So a thread
+// makes at most makesFlapMaxMakes beads in makesFlapWindow: past that an
+// event that matches a line is skipped and logged as a hook_rule event on
+// no bead saying why, and the thread makes again once its beads have aged
+// out of the window. The count is read from the store (the beads the
+// thread's links name), so a restarted daemon holds the same flap, and the
+// first remake after a close, the genuine reopen, is never the one held.
+//
 // An event is put to the table once. The bead it made carries its seq
 // (metaHookSeq), and every event a line matched is logged as a hook_rule
 // event with the line under makes, on the bead when one was made. A
@@ -47,6 +56,18 @@ import (
 // events how far each hook's table was put to its events, and makes nothing
 // of an older one. Nor of one from before the hook was last saved: a table
 // says nothing of what came before it.
+
+const (
+	// makesFlapWindow is how long a bead a thread made counts against the
+	// thread's flap guard (makes.go's head comment): a day, so a flap of
+	// minutes or hours is one flap, and a thread that comes back the next
+	// day is a new assignment.
+	makesFlapWindow = 24 * time.Hour
+	// makesFlapMaxMakes is the most beads one thread makes in
+	// makesFlapWindow before the guard holds it: the first, and remakes
+	// enough for a close that was a mistake, never a bead per cycle.
+	makesFlapMaxMakes = 3
+)
 
 // DepotRepoQuery is what DepotRepo is asked: the depot whose repository at
 // the source is wanted. Decl is the yard's declared source of that name,
@@ -191,6 +212,48 @@ func (d *Dispatcher) closedSince(ctx context.Context, ev ruleEvent, decl *source
 	return false
 }
 
+// flapHeld reports whether ev's thread has already made makesFlapMaxMakes
+// beads in makesFlapWindow, and why it is held, in the words a hook_rule
+// event on no bead records. Every bead the thread's links name counts,
+// tracking or only relating: a closed generation keeps a relates link, and
+// it was a mint with its comments all the same. A thread whose beads cannot
+// be read is held: nothing is made on what is not known, as closedSince
+// holds it. decl is the yard's declared source of the event's source, nil
+// for a builtin one.
+func (d *Dispatcher) flapHeld(ctx context.Context, ev ruleEvent, decl *source.Declaration) (string, bool) {
+	if ev.threadURL == "" {
+		return "", false
+	}
+	since := d.now().Add(-makesFlapWindow)
+	seen := map[string]bool{}
+	made := 0
+	for _, url := range threadURLs(ev, decl) {
+		links, err := d.Store.IssueLinks(ctx, url)
+		if err != nil {
+			d.Log.Warn("hook event: reading the thread's links for the flap guard", "thread", url, "err", err)
+			return "the thread's links could not be read", true
+		}
+		for _, l := range links {
+			if l.Source != ev.source || seen[l.Bead] {
+				continue
+			}
+			seen[l.Bead] = true
+			b, err := d.Store.GetBead(ctx, l.Bead)
+			if err != nil {
+				d.Log.Warn("hook event: reading a bead of the thread for the flap guard", "bead", l.Bead, "err", err)
+				return "a bead of the thread could not be read", true
+			}
+			if b.CreatedAt.After(since) {
+				made++
+			}
+		}
+	}
+	if made < makesFlapMaxMakes {
+		return "", false
+	}
+	return fmt.Sprintf("the thread flapped, %d beads in %s: held until they age out of the flap window", made, makesFlapWindow), true
+}
+
 // make puts ev, about a thread no open bead tracks, to its hook's table of
 // what its events make. It returns the bead that tracks the thread after
 // all, when one came to between the look for it and the write: the event
@@ -221,6 +284,17 @@ func (d *Dispatcher) make(ctx context.Context, ev ruleEvent, pass *hookPass, dec
 	}
 	d.madeTo[h.Name] = ev.seq
 	data := map[string]any{"hook": h.Name, "event": ev.typ, "seq": ev.seq, "makes": line.String(), "thread": ev.threadURL}
+	if flap, held := d.flapHeld(ctx, ev, decl); held {
+		// The skip is logged as any make that made nothing is, with why,
+		// and madeTo above has already taken the event: a restarted daemon
+		// reads this hook_rule event in makesFrom and judges it no again.
+		data["ignored"] = flap
+		d.Log.Info("hook event held by the flap guard", "hook", h.Name, "event", ev.typ, "thread", ev.threadURL, "makes", line.String(), "why", flap)
+		if err := d.Store.LogDispatch(ctx, "", "hook_rule", actor, data); err != nil {
+			d.Log.Warn("hook_rule event", "err", err)
+		}
+		return false
+	}
 	depot, why := d.depotFor(ctx, ev, line, decl)
 	var bead *store.Bead
 	if why == "" {

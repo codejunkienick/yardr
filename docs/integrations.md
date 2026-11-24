@@ -2676,7 +2676,10 @@ The same steps as Linear, with these differences:
   the first event made, and says to it what the other table has for it. A
   closed bead that tracks the thread does not stand in the way: the next
   event after the close makes a new bead, which takes the link, and the
-  closed one keeps a `relates` link. A line is refused when the type's
+  closed one keeps a `relates` link. A thread that flaps (assigned,
+  closed, assigned again) makes at most three beads in a day: past that, an
+  event it matches makes nothing and a `hook_rule` event on no bead says so
+  under `ignored`, until the thread's beads are a day old. A line is refused when the type's
   flow in the depot has no such stage a bead can be made in: the refusal is
   logged as `make_refused`, of the class `attention`, beside the
   `hook_rule` event. What the yard

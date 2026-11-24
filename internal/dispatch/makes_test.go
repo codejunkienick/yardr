@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"yardr.dev/yardr/internal/dispatch"
 	"yardr.dev/yardr/internal/hooks"
@@ -241,6 +242,7 @@ func TestClosedBeadDoesNotStopANewOne(t *testing.T) {
 	}
 	t.Run("close and reopen before one pass", testReopenedIssueInOnePassStartsAFreshBead)
 	t.Run("manual reclose uses its own time", testManualRecloseAfterEventCloseUsesCloseTime)
+	t.Run("a flap is held, then a genuine remake", testFlapIsHeldThenAGenuineRemakeMakesAgain)
 }
 
 // An issue closed and reopened before the pass that reads either has a
@@ -307,6 +309,78 @@ func testManualRecloseAfterEventCloseUsesCloseTime(t *testing.T) {
 	}
 	if open, err := r.api.ListBeads(ctx, store.BeadFilter{}); err != nil || len(open) != 0 {
 		t.Fatalf("open beads after the hand close: %d (%v), want none", len(open), err)
+	}
+}
+
+// A thread that flaps (opened, closed, opened again on every cycle) makes
+// a bounded few beads, never one a cycle: past the flap guard's most, a
+// matching event makes nothing and is logged on no bead as held, a
+// restarted daemon holds it too, and once the beads have aged out of the
+// window the next event makes again, the genuine remake.
+func testFlapIsHeldThenAGenuineRemakeMakesAgain(t *testing.T) {
+	t.Helper()
+	r := newMakingDepot(t, contributorMakes...)
+	ctx := context.Background()
+	reopen := func() {
+		r.deliverAs(t, "gh", "issues", "issues_opened", func(s string) string {
+			return strings.Replace(s, `"action": "opened"`, `"action": "reopened"`, 1)
+		})
+		r.pass(t)
+	}
+	closeTracking := func() {
+		b := r.made(t, issue23)
+		_, err := r.api.CloseBead(ctx, b.ID, "not ours", store.Expect{}, "me")
+		must(t, err)
+	}
+
+	r.deliverAs(t, "gh", "issues", "issues_opened", nil)
+	r.pass(t)
+	first := r.made(t, issue23)
+	// Two remakes are a close that was a mistake, not yet a flap.
+	for range 2 {
+		closeTracking()
+		reopen()
+		if b := r.made(t, issue23); b.ID == first.ID || b.Status != "open" {
+			t.Fatalf("a remake after a close: %s (%s), want a new open bead beside %s", b.ID, b.Status, first.ID)
+		}
+	}
+	if all, err := r.api.ListBeads(ctx, store.BeadFilter{}); err != nil || len(all) != 1 {
+		t.Fatalf("open beads after two remakes: %d (%v), want the one", len(all), err)
+	}
+
+	// The next cycle is the flap: nothing is made, and the skip says why.
+	closeTracking()
+	reopen()
+	if tracks, relates := r.tracking(t, issue23); len(tracks) != 1 || len(relates) != 2 {
+		t.Fatalf("beads of %s after the flap was held: tracks %v, relates %v, want the closed bead and its two closed remakes", issue23, tracks, relates)
+	}
+	if all, err := r.api.ListBeads(ctx, store.BeadFilter{All: true}); err != nil || len(all) != 3 {
+		t.Fatalf("beads after the flap was held: %d (%v), want the three", len(all), err)
+	}
+	wantRules(t, r.beadless(t), "ignored: the thread flapped, 3 beads in 24h0m0s")
+
+	// A daemon that starts again holds it too: the count is in the store,
+	// and the skip it reads in the log is judged no again either.
+	reopen()
+	fresh := &dispatch.Dispatcher{Store: r.api, Runners: r.d.Runners, PRHead: r.d.PRHead, CI: r.d.CI, DepotRepo: r.d.DepotRepo}
+	must(t, fresh.Reconcile(ctx))
+	wantRules(t, r.beadless(t),
+		"ignored: the thread flapped, 3 beads in 24h0m0s",
+		"ignored: the thread flapped, 3 beads in 24h0m0s")
+	if all, err := r.api.ListBeads(ctx, store.BeadFilter{All: true}); err != nil || len(all) != 3 {
+		t.Fatalf("beads after a restart held the flap: %d (%v), want the three", len(all), err)
+	}
+
+	// Once the window has passed the assignment is genuine again: it makes
+	// the next bead, which takes the link, and the held ones keep relates.
+	dispatch.SetClock(r.d, func() time.Time { return time.Now().Add(25 * time.Hour) })
+	reopen()
+	fourth := r.made(t, issue23)
+	if fourth.ID == first.ID || fourth.Status != "open" || fourth.Stage != "triage" {
+		t.Fatalf("after the flap window: %s (%s, %s), want a new open bead in triage", fourth.ID, fourth.Status, fourth.Stage)
+	}
+	if _, relates := r.tracking(t, issue23); len(relates) != 3 {
+		t.Fatalf("beads relating to %s: %v, want the three closed ones", issue23, relates)
 	}
 }
 
