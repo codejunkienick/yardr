@@ -12,13 +12,16 @@ import (
 	"yardr.dev/yardr/internal/source"
 )
 
-// A bound input of a source (a mint input its declaration marks bound)
+// A mint input whose name some source of the yard declares bound
 // belongs to one holder across the whole yard: the yard, in any
-// source's env file, or one user, in theirs. Giving refuses a bound
-// value another holder has, and a call made as a user refuses one its
-// file names from another holder, so a file edited by hand is caught
-// as a given one is. The value itself is never kept or shown: only
-// who holds it is answered.
+// source's env file, or one user, in theirs. Giving refuses such a
+// value another holder holds — for an input the target source itself
+// binds, and for one it leaves unbound that another source binds —
+// and a call made as a user refuses one its file names from another
+// holder, so a file edited by hand is caught as a given one is. A
+// name bound nowhere is never held, so a value every holder shares
+// passes. The value itself is never kept or shown: only who holds
+// it is answered.
 
 // BoundHolder answers which holder other than except holds value of
 // the bound input input of the source sourceName: the yard, a user, or
@@ -76,10 +79,72 @@ func (w *wtx) boundHolder(src *Source, input, value string, except source.Holder
 	return BoundHolderIn(w.home, src, sources, users, input, value, except)
 }
 
-// boundLookup is a BoundHolder for the calls of src: which holder holds
-// each bound value a call as a user names, read as the files stand.
-func (s *Store) boundLookup(src *Source) source.BoundHolder {
-	return func(input, value string, except source.Holder) (source.Holder, error) {
+// YardBoundNames is the set of mint input names some source of the
+// yard declares bound, from sources as they stand: the yard-wide set a
+// giving or a call is held to, so a name bound on one source is held
+// on every source that mints with it, and one bound nowhere is held
+// nowhere. It is worked out fresh at each check, with no cache, as
+// the declarations stand then. A source whose declaration does not
+// read fails the set: the holder of its bound names would be unseen,
+// so the check that asked refuses (fail closed), where the pasted
+// sign-in's check (googlecred.go) skips such a source, which mints
+// nothing.
+func YardBoundNames(sources []Source) (map[string]bool, error) {
+	out := map[string]bool{}
+	for i := range sources {
+		d, err := sources[i].Declaration()
+		if err != nil {
+			return nil, err
+		}
+		if d.Credential == nil {
+			continue
+		}
+		for _, name := range d.Credential.Bound {
+			out[name] = true
+		}
+	}
+	return out, nil
+}
+
+// yardBound is YardBoundNames for the yard as it stands inside w's
+// write, from its sources in the same transaction.
+func (w *wtx) yardBound() (map[string]bool, error) {
+	var sources []Source
+	if err := each(w.Tx, bSources, "", func(_ []byte, other *Source) error {
+		sources = append(sources, *other)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return YardBoundNames(sources)
+}
+
+// yardBound is YardBoundNames for the yard as it stands.
+func (s *Store) yardBound() (map[string]bool, error) {
+	var sources []Source
+	err := s.read(func(tx *bolt.Tx) error {
+		return each(tx, bSources, "", func(_ []byte, other *Source) error {
+			sources = append(sources, *other)
+			return nil
+		})
+	})
+	if err != nil {
+		return nil, err
+	}
+	return YardBoundNames(sources)
+}
+
+// boundLookup is a BoundHolder for the calls of src, with the yard's
+// bound names beside it: which holder holds each bound value a call
+// as a user names, read as the files stand. The names are the yard's
+// as the call is made; an unreadable declaration refuses the call
+// before anything mints.
+func (s *Store) boundLookup(src *Source) (source.BoundHolder, map[string]bool, error) {
+	yardBound, err := s.yardBound()
+	if err != nil {
+		return nil, nil, err
+	}
+	holder := func(input, value string, except source.Holder) (source.Holder, error) {
 		var sources []Source
 		var users []User
 		err := s.read(func(tx *bolt.Tx) error {
@@ -99,6 +164,20 @@ func (s *Store) boundLookup(src *Source) source.BoundHolder {
 		}
 		return BoundHolderIn(s.home, src, sources, users, input, value, except)
 	}
+	return holder, yardBound, nil
+}
+
+// readUserBound is ReadUserCredentialBound for a call of src as a user,
+// held to the yard's bound names as they stand: the credential in
+// envFile for a call of kind, refused before anything mints where a
+// mint input bound anywhere in the yard names another holder's value,
+// and refused where a declaration of the yard does not read.
+func (s *Store) readUserBound(ctx context.Context, d *source.Declaration, src *Source, user, envFile, kind string) (string, string, error) {
+	holder, yardBound, err := s.boundLookup(src)
+	if err != nil {
+		return "", "", err
+	}
+	return d.ReadUserCredentialBound(ctx, user, envFile, src.mintIn(s.home), kind, ReadEnvFileEntries, holder, yardBound)
 }
 
 // BoundHolderIn is who holds value of input among the yard and users,
@@ -179,14 +258,26 @@ func envHolds(path, input, want string) (bool, error) {
 	return strings.TrimSpace(source.Lookup(f.Env, input)) == want, nil
 }
 
-// checkBoundValues refuses a giving of values to self where a bound
-// input it names is held by another holder. d names the bound inputs; a
-// value held by self alone, or by nobody, stands. It repeats no value.
+// checkBoundValues refuses a giving of values to self where a mint
+// input it names is held by another holder: of the mint's inputs it
+// asks only for a name some source of the yard declares bound (the
+// set as the sources stand in this write), so an input bound nowhere
+// passes however widely its value is shared, and one this source
+// leaves unbound is refused where another source binds its name. A
+// value held by self alone, or by nobody, stands. A static value is
+// no mint input and is never asked for. It repeats no value.
 func (w *wtx) checkBoundValues(src *Source, d *source.Declaration, self source.Holder, values map[string]string) error {
 	if d.Credential == nil {
 		return nil
 	}
-	for _, name := range d.Credential.Bound {
+	yardBound, err := w.yardBound()
+	if err != nil {
+		return err
+	}
+	for _, name := range d.Credential.Mint {
+		if !yardBound[name] {
+			continue
+		}
 		value, given := values[name]
 		if !given || strings.TrimSpace(value) == "" {
 			continue

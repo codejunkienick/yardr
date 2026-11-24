@@ -1070,7 +1070,13 @@ for it, as for a host.
   any other holder when it is given (`yardr source key`, an answered
   secret ask) and when a call made as a user reads it, a file edited by
   hand included; the refusal names the holder and the giving that frees
-  it, and never the value. A call of the yard's own is not refused: it
+  it, and never the value. The holding is by name across the yard: once
+  any source marks a name bound, every source that mints with that name
+  is held to it, one that leaves the name unbound included, so
+  installing a pack that marks a name protects the other sources that
+  mint with it from then on, and taking the last bound marking of a
+  name away ends the protection everywhere. A name no source marks
+  bound is never held, however widely its value is shared. A call of the yard's own is not refused: it
   reads the yard's holder's value as it always has. The file may bring the command itself,
   `credential.mint_command: [<file>]`, a program beside the file that the
   yard copies under `<home>/sources/<name>/` and hashes as it does every

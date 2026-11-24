@@ -1568,7 +1568,7 @@ process for it. Nothing of the request is written anywhere.`,
 				}
 				stateOf = func() (string, error) { return d.UserCredentialState(u.Name, u.EnvFile, store.ReadEnvFileEntries) }
 				readOf = func(ctx context.Context) (string, string, error) {
-					return d.ReadUserCredentialBound(ctx, u.Name, u.EnvFile, src.Mint, source.Read, store.ReadEnvFileEntries, a.boundHolderFor(ctx, st, src))
+					return a.readUserBound(ctx, st, src, d, u)
 				}
 				saidAs = " as " + u.Name
 			}

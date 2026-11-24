@@ -56,7 +56,11 @@ func (s *Store) hostedCredential(ctx context.Context, d *source.Declaration, src
 		return "", err
 	}
 	if req.As != "" {
-		if err := d.CheckBound(req.As, sel, s.boundLookup(src)); err != nil {
+		holder, yardBound, err := s.boundLookup(src)
+		if err != nil {
+			return "", err
+		}
+		if err := d.CheckBound(req.As, sel, holder, yardBound); err != nil {
 			return "", err
 		}
 	}

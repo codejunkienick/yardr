@@ -380,3 +380,227 @@ func TestBoundCallHoldsOneHolder(t *testing.T) {
 		t.Fatalf("a hosted call as ada on gog2 on the yard's account on gog = %v, hostedCalls=%d", err, hostedCalls.Load())
 	}
 }
+
+// unboundFile is boundFile with the same mint input left unbound: what a
+// second source that mints with the yard-bound name but binds nothing
+// declares.
+const unboundFile = `name: gogu
+base: https://gog.example.com
+credential:
+  env: GOG_TOKEN
+  header: "Authorization: Bearer {credential}"
+  mint:
+    - name: GOG_ACCOUNT
+      secret: false
+calls:
+  ping: { kind: read, request: { method: GET, path: /me } }
+`
+
+// sharedFile mints from two names no source binds, as a shared
+// application id and secret are: every holder may hold the same value.
+const sharedFile = `name: lin
+base: https://lin.example.com
+credential:
+  env: LIN_TOKEN
+  header: "Authorization: Bearer {credential}"
+  mint: [LINEAR_CLIENT_ID, LINEAR_SECRET]
+calls:
+  ping: { kind: read, request: { method: GET, path: /me } }
+`
+
+// An unbound mint input cannot take a value held as bound on another
+// source: giving the yard's bound address through a source that leaves
+// the name unbound is refused with the bound sentences, one pinned
+// whole, and a name bound nowhere takes one value for every holder.
+func TestBoundGiveUnboundTake(t *testing.T) {
+	t.Parallel()
+	y := boundYard(t)
+	if _, err := y.PutSource(y.ctx, "gogu.yaml", unboundFile, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	const yardAddr, adaAddr = "yard@example.com", "ada@example.com"
+	if _, err := y.KeySource(y.ctx, "gog", map[string]string{"GOG_ACCOUNT": yardAddr}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	// The yard's bound address taken through the unbound source, pinned
+	// whole: the landed refusal, with the holding source named.
+	_, err := y.KeyUserCredential(y.ctx, "ada", "gogu", map[string]string{"GOG_ACCOUNT": yardAddr}, "ada")
+	want := "source gogu: GOG_ACCOUNT is held by the yard already (on source gog): a bound input belongs to one holder; give a different GOG_ACCOUNT with yardr source key gogu --as ada, or have the yard give a different GOG_ACCOUNT with yardr source key gog and give this again"
+	if err == nil || err.Error() != want {
+		t.Fatalf("the yard's bound address given to ada through gogu =\n%v\nwant\n%s", err, want)
+	}
+	if u, err := y.GetUser(y.ctx, "ada"); err != nil || u.EnvFile != "" {
+		t.Fatalf("a refused unbound giving set ada's file: %+v, %v", u, err)
+	}
+	// The yard's own value through the unbound source stands (except-self),
+	// and ada's own through it stands; bia taking ada's through it is
+	// refused as for the bound source, naming no source for a user hit.
+	if _, err := y.KeySource(y.ctx, "gogu", map[string]string{"GOG_ACCOUNT": yardAddr}, "mckean"); err != nil {
+		t.Fatalf("the yard's own through gogu: %v", err)
+	}
+	if _, err := y.KeyUserCredential(y.ctx, "ada", "gog", map[string]string{"GOG_ACCOUNT": adaAddr}, "ada"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.KeyUserCredential(y.ctx, "bia", "gogu", map[string]string{"GOG_ACCOUNT": adaAddr}, "bia"); err == nil ||
+		!strings.Contains(err.Error(), "source gogu: GOG_ACCOUNT is held by ada already") || strings.Contains(err.Error(), adaAddr) {
+		t.Fatalf("ada's address given to bia through gogu = %v", err)
+	}
+	if _, err := y.KeyUserCredential(y.ctx, "ada", "gogu", map[string]string{"GOG_ACCOUNT": adaAddr}, "ada"); err != nil {
+		t.Fatalf("ada's own through gogu: %v", err)
+	}
+	// A name bound nowhere: one shared value for yard and users alike,
+	// at give as at call (the call row is TestBoundCallUnboundTake's).
+	if _, err := y.PutSource(y.ctx, "lin.yaml", sharedFile, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	shared := map[string]string{"LINEAR_CLIENT_ID": "app-shared", "LINEAR_SECRET": "sec-shared"}
+	if _, err := y.KeySource(y.ctx, "lin", shared, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.KeyUserCredential(y.ctx, "ada", "lin", shared, "ada"); err != nil {
+		t.Fatalf("a shared value of a name bound nowhere, for ada: %v", err)
+	}
+	if _, err := y.KeyUserCredential(y.ctx, "bia", "lin", shared, "bia"); err != nil {
+		t.Fatalf("a shared value of a name bound nowhere, for bia: %v", err)
+	}
+}
+
+// A call made as a user whose file names the yard's bound value through
+// a source that leaves the name unbound is refused before anything
+// mints, as through the bound source; the holder's own call through it
+// mints, and a value of a name bound nowhere mints for every holder.
+func TestBoundCallUnboundTake(t *testing.T) {
+	t.Parallel()
+	tok := "tok-bound-minted"
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		if r.URL.Path != "/me" || r.Header.Get("Authorization") != "Bearer "+tok {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		fmt.Fprint(w, `{"id":"app"}`)
+	}))
+	t.Cleanup(srv.Close)
+
+	y, _ := secretYard(t)
+	unboundGog := strings.Replace(strings.Replace(boundGog(srv.URL), "name: gog", "name: gogu", 1), "      bound: true\n", "", 1)
+	for file, text := range map[string]string{"gog.yaml": boundGog(srv.URL), "gogu.yaml": unboundGog} {
+		if _, err := y.PutSource(y.ctx, file, text, "mckean"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := y.AddUser(y.ctx, "bia", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	runs := filepath.Join(dir, "runs")
+	script := filepath.Join(dir, "mint")
+	body := "#!/bin/sh\ncat >/dev/null\necho x >>" + runs + "\nprintf '{\"token\":\"" + tok + "\",\"expires_at\":\"2999-01-01T00:00:00Z\"}'\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"gog", "gogu"} {
+		if _, err := y.SetSource(y.ctx, name, SourceMintCommand, script, "mckean"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const yardAddr, adaAddr = "yard@example.com", "ada@example.com"
+	if _, err := y.KeySource(y.ctx, "gog", map[string]string{"GOG_ACCOUNT": yardAddr}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	adaKeyed, err := y.KeyUserCredential(y.ctx, "ada", "gog", map[string]string{"GOG_ACCOUNT": adaAddr}, "ada")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// By hand, past every giving: ada's file names the yard's account,
+	// and a call through the unbound source refuses naming the bound one.
+	if _, _, err := WriteEnvFile(adaKeyed.File, map[string]string{"GOG_ACCOUNT": yardAddr}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = y.CallSource(y.ctx, SourceCall{Source: "gogu", Call: "ping", As: "ada", Actor: "mckean"})
+	if err == nil || !strings.Contains(err.Error(), "GOG_ACCOUNT in "+adaKeyed.File+" names the yard's (on source gog) account, not ada's") ||
+		!strings.Contains(err.Error(), "a bound input belongs to one holder") || strings.Contains(err.Error(), yardAddr) {
+		t.Fatalf("a call as ada through gogu on the yard's account = %v", err)
+	}
+	if hits.Load() != 0 {
+		t.Fatalf("a refused unbound call reached the service %d times", hits.Load())
+	}
+	if _, err := os.Stat(runs); !os.IsNotExist(err) {
+		t.Fatalf("a refused unbound call minted: %v", err)
+	}
+	// Ada's own value through the unbound source mints as it always has.
+	if _, _, err := WriteEnvFile(adaKeyed.File, map[string]string{"GOG_ACCOUNT": adaAddr}); err != nil {
+		t.Fatal(err)
+	}
+	res, err := y.CallSource(y.ctx, SourceCall{Source: "gogu", Call: "ping", As: "ada", Actor: "mckean"})
+	if err != nil || string(res.Answer) != `{"id":"app"}` || hits.Load() != 1 {
+		t.Fatalf("a call as ada through gogu on her own account = %+v, %v, after %d hits", res, err, hits.Load())
+	}
+	// A name bound nowhere, shared by yard and user: the call mints.
+	linFile := strings.Replace(sharedFile, "https://lin.example.com", srv.URL, 1)
+	if _, err := y.PutSource(y.ctx, "lin.yaml", linFile, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.SetSource(y.ctx, "lin", SourceMintCommand, script, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	shared := map[string]string{"LINEAR_CLIENT_ID": "app-shared", "LINEAR_SECRET": "sec-shared"}
+	if _, err := y.KeySource(y.ctx, "lin", shared, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.KeyUserCredential(y.ctx, "ada", "lin", shared, "ada"); err != nil {
+		t.Fatal(err)
+	}
+	res, err = y.CallSource(y.ctx, SourceCall{Source: "lin", Call: "ping", As: "ada", Actor: "mckean"})
+	if err != nil || string(res.Answer) != `{"id":"app"}` || hits.Load() != 2 {
+		t.Fatalf("a call as ada on a shared name bound nowhere = %+v, %v, after %d hits", res, err, hits.Load())
+	}
+}
+
+// A source whose declaration does not read while the yard's bound
+// names are worked out refuses the giving and the call alike (fail
+// closed): its bound names would be unseen, where the pasted sign-in's
+// check skips such a source, which mints nothing.
+func TestBoundUnparseableRefuses(t *testing.T) {
+	t.Parallel()
+	y := boundYard(t)
+	const yardAddr, adaAddr = "yard@example.com", "ada@example.com"
+	if _, err := y.KeySource(y.ctx, "gog", map[string]string{"GOG_ACCOUNT": yardAddr}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	adaKeyed, err := y.KeyUserCredential(y.ctx, "ada", "gog", map[string]string{"GOG_ACCOUNT": adaAddr}, "ada")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = adaKeyed
+	// A stored declaration no build here reads: put past PutSource,
+	// which would have refused it, as an older yard's stands.
+	if err := y.write(func(w *wtx) error {
+		return put(w.Tx, bSources, "broken", Source{Name: "broken", Text: "name: broken\n"})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.KeyUserCredential(y.ctx, "bia", "gog", map[string]string{"GOG_ACCOUNT": "bia@example.com"}, "bia"); err == nil ||
+		!strings.Contains(err.Error(), "broken") {
+		t.Fatalf("a giving with an unreadable declaration in the yard = %v", err)
+	}
+	if u, err := y.GetUser(y.ctx, "bia"); err != nil || u.EnvFile != "" {
+		t.Fatalf("a refused giving set bia's file: %+v, %v", u, err)
+	}
+	if _, err := y.KeySource(y.ctx, "gog", map[string]string{"GOG_ACCOUNT": "other@example.com"}, "mckean"); err == nil ||
+		!strings.Contains(err.Error(), "broken") {
+		t.Fatalf("a yard giving with an unreadable declaration in the yard = %v", err)
+	}
+	_, err = y.CallSource(y.ctx, SourceCall{Source: "gog", Call: "ping", As: "ada", Actor: "mckean"})
+	if err == nil || !strings.Contains(err.Error(), "broken") {
+		t.Fatalf("a call with an unreadable declaration in the yard = %v", err)
+	}
+	// The set itself: the bound name of a readable yard, and the refusal.
+	if set, err := YardBoundNames([]Source{{Name: "gog", Text: boundFile}}); err != nil || !set["GOG_ACCOUNT"] || len(set) != 1 {
+		t.Fatalf("YardBoundNames(gog) = %v, %v", set, err)
+	}
+	if _, err := YardBoundNames([]Source{{Name: "broken", Text: "name: broken\n"}}); err == nil {
+		t.Fatalf("YardBoundNames(broken) = no error")
+	}
+}

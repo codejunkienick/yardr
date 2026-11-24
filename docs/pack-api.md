@@ -386,7 +386,14 @@ secret, such as an account address, and is drawn in the clear.
 `bound: true` binds the value to one holder across the whole yard —
 the yard in any source's own file, or one user in theirs — and the yard
 refuses that value for any other holder, when it is given and when a
-call made as a user reads it. Both are read for every pack, as every key of a declaration is
+call made as a user reads it. The binding is by name across the yard:
+once any source marks a name bound, every source that mints with that
+name is held to it, one that leaves the name unbound included, so
+installing a pack that marks a name protects the other sources that
+mint with it from then on, and taking the last bound marking of a
+name away (the declaration writes are the operator's, as every source
+write is) ends the protection everywhere. A name no source marks
+bound is never held, however widely its value is shared. Both are read for every pack, as every key of a declaration is
 ([A declaration added by hand](#a-declaration-added-by-hand)): a
 declaration carries no API number of its own.
 
