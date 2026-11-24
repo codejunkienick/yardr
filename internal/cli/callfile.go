@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"yardr.dev/yardr/internal/source"
 	"yardr.dev/yardr/internal/store"
@@ -83,9 +84,11 @@ func fileNotWritten(res *store.SourceAnswer, why error) error {
 // writeCallFile writes data in dir under name, never overwriting: by a
 // temporary file in the same directory and a link under the final name,
 // so a reader never finds half a file there and two writers of one name
-// land as numbered neighbours (name-1.ext), each complete. The file is
-// 0600, never executable: the yard writes data. It answers the name
-// actually written.
+// land as numbered neighbours (name-1.ext), each complete. A neighbour is
+// held to the limit a file's name has, as the name is: the stem is cut, at
+// a character boundary, to make room for the number. The file is 0600,
+// never executable: the yard writes data. It answers the name actually
+// written.
 func writeCallFile(dir, name string, data []byte) (string, error) {
 	name = strings.ReplaceAll(name, "\\", "/")
 	if i := strings.LastIndex(name, "/"); i >= 0 {
@@ -120,7 +123,21 @@ func writeCallFile(dir, name string, data []byte) (string, error) {
 	for n := 0; ; n++ {
 		candidate := name
 		if n > 0 {
-			candidate = fmt.Sprintf("%s-%d%s", stem, n, ext)
+			// A name at the limit has no room for its number, and the file
+			// system refuses a longer one as too long, which is no sign
+			// that the name stands: the write would fail outright, whatever
+			// the number. So the stem gives up the bytes the number takes,
+			// and the extension stays.
+			suffix := fmt.Sprintf("-%d", n)
+			if cut := cutUTF8(stem, store.MaxBlobName-len(suffix)-len(ext)); cut != "" {
+				candidate = cut + suffix + ext
+			} else {
+				// An extension so long that not one character of the stem
+				// fits beside it is cut with the rest of the name and the
+				// number goes last, so a neighbour never begins with its
+				// number.
+				candidate = cutUTF8(name, store.MaxBlobName-len(suffix)) + suffix
+			}
 		}
 		switch err := os.Link(tmpName, filepath.Join(dir, candidate)); {
 		case err == nil:
@@ -131,6 +148,20 @@ func writeCallFile(dir, name string, data []byte) (string, error) {
 			return "", fmt.Errorf("every numbered neighbour of %s stands already", name)
 		}
 	}
+}
+
+// cutUTF8 is s cut to at most maxBytes bytes at a character boundary: a
+// character the cut would split goes whole, so what is left is as valid as
+// what it was cut from. A maxBytes of zero or less leaves nothing, as an
+// extension that took the whole room would.
+func cutUTF8(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	for maxBytes > 0 && !utf8.RuneStart(s[maxBytes]) {
+		maxBytes--
+	}
+	return s[:max(maxBytes, 0)]
 }
 
 // callKindWord is a call's kind as a list marks it: "file" for a call

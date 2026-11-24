@@ -2153,9 +2153,11 @@ file: ./crm-content-Plan.docx (1,832,044 bytes)
   chooses, by a temporary file and a link under the final name, so no
   reader finds half a file and no standing file is overwritten (a name
   that stands is given a numbered neighbour, `crm-content-Plan-1.docx`,
-  and the name actually written is what is printed). Its mode is 0600,
-  never executable, and the yard never opens, runs or renders it. Every
-  caller has such a directory: a session its worktree, a crew member the
+  also at most 255 bytes: a name with no room for its number is cut
+  before it, at a character boundary, and keeps its extension; the name
+  actually written is what is printed). Its mode is 0600, never
+  executable, and the yard never opens, runs or renders it. Every caller
+  has such a directory: a session its worktree, a crew member the
   directory its pane stands in, the operator wherever they stand.
 - **The name.** The final download's `Content-Disposition` filename
   suggests it, and a usable one is written as `<source>-<call>-<suggested>`:

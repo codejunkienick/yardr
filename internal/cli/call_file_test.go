@@ -37,8 +37,9 @@ calls:
 
 // fileYard is a yard of the operator jo with the docs source against a
 // stand-in: item 7 names its file, item 8 names a hostile one, item 9
-// names none, item 10 names a hidden one, and item 11 names the file a
-// harness reads as its instructions. It returns the store and jo's app.
+// names none, item 10 names a hidden one, item 11 names the file a
+// harness reads as its instructions, and item 12 names one of 300 bytes.
+// It returns the store and jo's app.
 func fileYard(t *testing.T) (store.API, *app, string) {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -61,6 +62,9 @@ func fileYard(t *testing.T) (store.API, *app, string) {
 		case "/api/items/11/content":
 			w.Header().Set("Content-Disposition", `attachment; filename="CLAUDE.md"`)
 			io.WriteString(w, fileNotes)
+		case "/api/items/12/content":
+			w.Header().Set("Content-Disposition", `attachment; filename="`+strings.Repeat("a", 300)+`"`)
+			io.WriteString(w, filePlan)
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -179,7 +183,11 @@ func TestCallFileFallbackName(t *testing.T) {
 }
 
 // A name that already stands is given its numbered neighbour, and what
-// stands is left as it was.
+// stands is left as it was. A name at the limit of a file's name has no
+// room for the number, so its neighbour gives up the bytes the number takes,
+// from the stem and at a character boundary, and keeps the extension: the
+// file system refuses a longer name as too long, which is no sign that the
+// name stands, so the write would fail outright.
 func TestCallFileNumberedNeighbour(t *testing.T) {
 	_, jo, _ := fileYard(t)
 	dir := t.TempDir()
@@ -198,6 +206,82 @@ func TestCallFileNumberedNeighbour(t *testing.T) {
 		t.Fatalf("what stood = %q", data)
 	}
 	written(t, dir, "docs-content-Plan-1.docx", filePlan)
+
+	// Eleven writes of one name reach its neighbours -1 to -10, where the
+	// number takes a third byte. Each name is held to the rule a file's name
+	// is (at most 255 bytes, valid UTF-8), and to keeping all it can of the
+	// name: the cut gives up a byte more than the number's only where it
+	// would split a character. head is what every neighbour begins with, and
+	// tail what follows its number: the extension, where it stays.
+	for _, c := range []struct {
+		name  string
+		file  string
+		head  string
+		tail  string
+		least int
+	}{
+		{"no extension", "docs-content-" + strings.Repeat("a", 242), "docs-content-a", "", 255},
+		{"an extension", "docs-content-" + strings.Repeat("a", 237) + ".docx", "docs-content-a", ".docx", 255},
+		{"two-byte characters", "docs-content-" + strings.Repeat("é", 121), "docs-content-é", "", 254},
+		// An extension with no room beside even one byte of the stem, and
+		// one with room for half of its first character: the neighbour is
+		// the name cut before the number, the extension's tail lost.
+		{"an extension and no room for the stem", "a." + strings.Repeat("b", 253), "a.b", "", 255},
+		{"an extension and room for half a character", "é." + strings.Repeat("b", 251), "é.b", "", 254},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			const writes = 11
+			names := make([]string, writes)
+			for i := range names {
+				name, err := writeCallFile(dir, c.file, []byte(fmt.Sprintf("write %d", i)))
+				if err != nil {
+					t.Fatalf("write %d of the name of %d bytes: %v", i, len(c.file), err)
+				}
+				names[i] = name
+			}
+			for i, name := range names {
+				if err := store.CheckBlobName(name); err != nil {
+					t.Fatalf("write %d is named %q: %v", i, name, err)
+				}
+				switch {
+				case i == 0 && name != c.file:
+					t.Fatalf("write 0 is named %q, want %q", name, c.file)
+				case i > 0 && (!strings.HasPrefix(name, c.head) || !strings.HasSuffix(name, fmt.Sprintf("-%d%s", i, c.tail))):
+					t.Fatalf("write %d is named %q, want %q ... -%d%s", i, name, c.head, i, c.tail)
+				case len(name) < c.least:
+					t.Fatalf("write %d is named %q of %d bytes, which gives up more than it must (want %d at least)", i, name, len(name), c.least)
+				}
+				written(t, dir, name, fmt.Sprintf("write %d", i))
+			}
+			if entries, _ := os.ReadDir(dir); len(entries) != writes {
+				t.Fatalf("the directory holds %d files after %d writes", len(entries), writes)
+			}
+		})
+	}
+
+	// The same through the command: a service's name of 300 bytes is cut to
+	// 255 by the yard, and the second file is the neighbour of that.
+	t.Run("a name the yard cut", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Chdir(dir)
+		for _, want := range []string{
+			"docs-content-" + strings.Repeat("a", 242),
+			"docs-content-" + strings.Repeat("a", 240) + "-1",
+		} {
+			out, err := run(t, jo.callCmd(), "docs", "content", "id=12")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(out, "file: ./"+want+" (") {
+				t.Fatalf("call = %q, want the file %s", out, want)
+			}
+			written(t, dir, want, filePlan)
+		}
+		if entries, _ := os.ReadDir(dir); len(entries) != 2 {
+			t.Fatalf("the directory holds %d files after two calls", len(entries))
+		}
+	})
 }
 
 // --json prints the file object alone, with the name actually written,
