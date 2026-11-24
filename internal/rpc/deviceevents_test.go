@@ -332,7 +332,7 @@ func TestNoRowTellsWhatNamesAFileOrACommand(t *testing.T) {
 			}
 		}
 	}
-	if want := []string{"inbox_read", "mail", "mail_read", "reaction"}; !slices.Equal(whole, want) {
+	if want := []string{"inbox_read", "inbox_shown", "mail", "mail_read", "reaction"}; !slices.Equal(whole, want) {
 		t.Errorf("the kinds told whole are %v, want %v: those EventFor tells to their parties alone", whole, want)
 	}
 }

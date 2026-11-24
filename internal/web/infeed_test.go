@@ -22,6 +22,7 @@ func TestFeedLeavesOutTurnsAndReading(t *testing.T) {
 	}{
 		{store.Event{Kind: "mail_read"}, false},
 		{store.Event{Kind: "inbox_read"}, false},
+		{store.Event{Kind: "inbox_shown"}, false},
 		{store.Event{Kind: "crew_login", Data: map[string]any{"crew": "yardmaster", "login_screen": true, "login_led": false}}, false},
 		{store.Event{Kind: "crew_login", Data: map[string]any{"crew": "yardmaster", "login_screen": false, "login_led": false}}, false},
 		{status("idle", "working"), false},

@@ -944,6 +944,10 @@ func TestCrewMemberAtItsUsageLimitIsPromptedWhenTheWindowHasReset(t *testing.T) 
 		t.Fatalf("in the wait: nudges %q, the provider run %d times; want the inbox's nudge and the ask of the stop", f.nudges, len(asks))
 	}
 
+	shown, err := s.Inbox(ctx, "yardmaster", 0)
+	must(t, err)
+	must(t, s.Mail(ctx, "yardmaster", "also review the timetable", "chris"))
+
 	// A cold wake defers for a crew member as for a session: nothing
 	// more is typed and no retry is spent until the refresh lands.
 	p.say(kimiOpen)
@@ -964,6 +968,7 @@ func TestCrewMemberAtItsUsageLimitIsPromptedWhenTheWindowHasReset(t *testing.T) 
 	if len(f.nudges) != 1 {
 		t.Fatalf("with the menu open at the wake: nudges = %q, want the inbox's nudge alone", f.nudges)
 	}
+	checkInboxShown(t, s, shown.Last)
 	m, err := s.GetCrew(ctx, "yardmaster")
 	must(t, err)
 	n, ev := kindCount(t, s, m.Journal, "nudge_held")
@@ -975,7 +980,7 @@ func TestCrewMemberAtItsUsageLimitIsPromptedWhenTheWindowHasReset(t *testing.T) 
 	f.input, f.dialog, f.line = "", "", ""
 	f.mu.Unlock()
 	must(t, d.Reconcile(ctx))
-	want := agent + ": " + resetLine + " 1 new in your inbox: run yardr inbox to read them, and yardr inbox --ack <seq> through the last you handled."
+	want := agent + ": " + resetLine + " 2 new in your inbox: run yardr inbox to read them, and yardr inbox --ack <seq> through the last you handled."
 	if len(f.nudges) != 2 || f.nudges[1] != want {
 		t.Fatalf("nudges = %q, want the line at the reset with the inbox's count", f.nudges)
 	}
@@ -996,6 +1001,7 @@ func TestCrewMemberAtItsUsageLimitIsPromptedWhenTheWindowHasReset(t *testing.T) 
 	f.set(agent, "working")
 	mine, err := s.Inbox(ctx, "yardmaster", 0)
 	must(t, err)
+	checkInboxShown(t, s, shown.Last, mine.Last)
 	must(t, s.AckInbox(ctx, "yardmaster", mine.Last))
 	*now = now.Add(3 * time.Minute)
 	must(t, d.Reconcile(ctx))

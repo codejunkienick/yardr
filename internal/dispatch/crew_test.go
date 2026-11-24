@@ -410,6 +410,20 @@ func agentOf(t *testing.T, s store.API) string {
 	return r.Handle["agent"].(string)
 }
 
+func checkInboxShown(t *testing.T, s store.API, through ...uint64) {
+	t.Helper()
+	events, err := s.EventsOfKind(context.Background(), "inbox_shown", len(through)+1)
+	must(t, err)
+	if len(events) != len(through) {
+		t.Fatalf("inbox_shown events = %+v, want receipts through %v", events, through)
+	}
+	for i, seq := range through {
+		if events[i].Data["through"] != float64(seq) {
+			t.Errorf("inbox_shown event = %+v, want through %d", events[i], seq)
+		}
+	}
+}
+
 func TestCrewKeptAliveAndInboxNudgedWhenIdle(t *testing.T) {
 	t.Parallel()
 	s, f, d := crewSetup(t, store.CrewMember{On: []string{"gave_up"}})
@@ -471,6 +485,8 @@ func TestCrewKeptAliveAndInboxNudgedWhenIdle(t *testing.T) {
 	if len(f.nudges) != 3 {
 		t.Fatalf("nudges = %v", f.nudges)
 	}
+	page, err := s.Inbox(ctx, "yardmaster", 0)
+	must(t, err)
 	// A daemon that replaced itself knows of no nudge of its own, which may
 	// have been lost in the gap: what stands unread is told on its first pass
 	// and then waits out the interval as any nudge does.
@@ -481,6 +497,8 @@ func TestCrewKeptAliveAndInboxNudgedWhenIdle(t *testing.T) {
 	if len(f.nudges) != 4 {
 		t.Fatalf("after a restart: nudges = %v, want one more on its first pass and no more", f.nudges)
 	}
+
+	checkInboxShown(t, s, told.Notified, page.Last)
 
 	// The session dies, long enough after its start to be no failed start:
 	// yard starts another.

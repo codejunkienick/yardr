@@ -56,7 +56,7 @@ func inFeed(e store.Event) bool {
 	// EventKind: an event from before the crew had the name is in the log
 	// under its old kind.
 	switch store.EventKind(e.Kind) {
-	case store.NoteJournal, store.NoteHandoff, "mail_read", "inbox_read", "timer_set", "timer_dropped", "timer_removed":
+	case store.NoteJournal, store.NoteHandoff, "mail_read", "inbox_read", "inbox_shown", "timer_set", "timer_dropped", "timer_removed":
 		return false
 	case "mail":
 		_, timer := e.Data["timer"]

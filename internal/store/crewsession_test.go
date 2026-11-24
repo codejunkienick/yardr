@@ -432,6 +432,26 @@ func TestCrewInboxReceipts(t *testing.T) {
 	held := head(t, s)
 	acks("watcher", []ack{{"--on attention delivery", "", held, []string{"inbox_read"}}})
 	acks("yardmaster", []ack{{"subscribed bead event", "", held, []string{"inbox_read"}}})
+
+	lineShown := hook("shown")
+	must(s.React(ctx, halMail, "👍", "hal"))
+	halShown := head(t, s)
+	for _, tc := range []struct {
+		name, session string
+		through       uint64
+		want          []string
+	}{
+		{"show line inbox", "", lineShown, []string{"inbox_shown"}},
+		{"repeat shown mark", "", lineShown, nil},
+		{"stale shown mark", "", held, nil},
+		{"show conversation inbox", "hal", halShown, []string{"inbox_shown"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			check(t, "yardmaster", tc.session, tc.through, func() error {
+				return s.MarkNotifiedFor(ctx, "yardmaster", tc.session, tc.through)
+			}, tc.want...)
+		})
+	}
 }
 
 // An upgrade with unread items replays none and hides none: a per-user

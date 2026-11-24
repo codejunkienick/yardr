@@ -391,15 +391,18 @@ func (s *Store) MarkRotationAskedFor(ctx context.Context, name, user string) err
 	})
 }
 
-// MarkNotifiedFor is MarkNotified for one session. The daemon's alone
-// (daemonOnly): only it nudges crew sessions.
+// MarkNotifiedFor is MarkNotified for one session. Only the daemon nudges
+// crew sessions. A mark that advances records what it typed as inbox_shown.
 func (s *Store) MarkNotifiedFor(ctx context.Context, name, user string, seq uint64) error {
 	if err := s.daemonOnly(ctx, "MarkNotifiedFor"); err != nil {
 		return err
 	}
-	return s.changeCrewSession(name, user, func(_ *wtx, _ *CrewMember, st *CrewSession) error {
-		st.Notified = max(st.Notified, seq)
-		return nil
+	return s.changeCrewSession(name, user, func(w *wtx, _ *CrewMember, st *CrewSession) error {
+		if seq <= st.Notified {
+			return nil
+		}
+		st.Notified = seq
+		return w.event("", "inbox_shown", name, crewInboxReceipt(name, user, seq))
 	})
 }
 

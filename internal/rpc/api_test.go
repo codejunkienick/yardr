@@ -1529,6 +1529,21 @@ var apiEvents = []apiEvent{
 		socketOnly: true,
 	},
 	{
+		title: "Crew inbox was shown: `inbox_shown`",
+		says:  "The yard typed an inbox line into a crew member's pane and advanced its notified mark. The inbox stays unread until the member acknowledges it.",
+		is:    kindOf("inbox_shown"),
+		fields: []field{
+			{"seq", "number", "the event's seq"},
+			{"kind", "string", "`inbox_shown`"},
+			{"actor", "string", "the crew member"},
+			{"at", "time", "when"},
+			{"data.reader", "string", "the crew member"},
+			{"data.through", "number", "the newest unread event when shown"},
+			{"data.session", "string", "`\"\"` for the line session, or the user of the conversation session"},
+		},
+		socketOnly: true,
+	},
+	{
 		title: "A reaction on mail: `reaction`",
 		says:  "A party to a letter put an emoji on it, or took theirs away. Read the conversation with the other party again then: `reactions` on the letter of `data.seq` is what it now holds.",
 		is:    kindOf("reaction"),
@@ -2946,6 +2961,9 @@ func runAPI(t *testing.T, network bool) *apiRun {
 	}
 	seq, _, err := st.RecordHook(fixtureCtx, "telegram", map[string]any{"source": "telegram", "type": "message", "text": "status?"}, []byte(`{}`), nil)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.MarkNotifiedFor(fixtureCtx, "signalman", "", seq); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.AckInbox(fixtureCtx, "signalman", seq); err != nil {
