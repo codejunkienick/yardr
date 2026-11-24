@@ -608,8 +608,11 @@ func quietPackages(out string) []string {
 // notJudgedLine is a strict run's refusal for one package: over budget
 // alone on a loaded machine, so not judged, with both times and the load.
 // The load is the machine's own line ("load 72.4 on 10 cores"), as the
-// gate's machineload prints it.
-var notJudgedLine = regexp.MustCompile(`(?m)^test: R1: (\S+) took (\S+) s in the run, (\S+) s alone: over budget, loaded machine \((load [^)]+)\), not judged$`)
+// gate's machineload prints it. The gate puts the verdict first, which is
+// what tells this line from its twin that refuses nothing ("R1: not failed:",
+// a landing's); TestQuietReadsTheGatesR1Lines reads the gate's own echo, so a
+// reword there fails that test and not, silently, this match.
+var notJudgedLine = regexp.MustCompile(`(?m)^test: R1: not judged: (\S+) took (\S+) s in the run, (\S+) s alone: over budget, loaded machine \((load [^)]+)\)$`)
 
 // quietNotJudged names the packages a strict whole-suite output refused to
 // judge: one per "not judged" line, in the order printed, each with the
@@ -625,7 +628,8 @@ func quietNotJudged(out string) []NotJudgedPackage {
 // overBudgetLine is a strict run's R1 failure for one package: over budget
 // alone on quiet samples, with both times. A package whose re-run itself
 // failed prints no alone time and matches nothing: its cause is unknown,
-// and the run fails as before.
+// and the run fails as before. TestQuietReadsTheGatesR1Lines holds it to the
+// gate's own echo, as it does notJudgedLine.
 var overBudgetLine = regexp.MustCompile(`(?m)^test: (\S+) took (\S+) s with -race, (\S+) s alone, over the 60 s budget \(docs/testing\.md R1\)$`)
 
 // quietOverBudget names the packages a whole-suite output failed on the R1

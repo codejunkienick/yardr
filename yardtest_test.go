@@ -1176,8 +1176,8 @@ func TestYardTestSelects(t *testing.T) {
 		// A file's row is that file only: .yardr/test is not a prefix of
 		// .yardr/tests.md, which no row knows.
 		{"the script itself", []string{".yardr/test"}, []string{
-			pre + ".yardr/test changed: read by the tests of .",
-			testedNoRace + " m.test/m"}},
+			pre + ".yardr/test changed: read by the tests of . internal/dispatch",
+			testedNoRace + " m.test/m m.test/m/internal/dispatch"}},
 		{"a file its name begins", []string{".yardr/tests.md"}, []string{
 			pre + ".yardr/tests.md is read by no known package: testing everything"}},
 		// conformance/bdp's test runs the scripts under conformance/ and nothing

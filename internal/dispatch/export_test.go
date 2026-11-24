@@ -304,3 +304,7 @@ const QuietRunKey = quietRunKey
 // QuietNotJudged names the packages a strict whole-suite output refused to
 // judge, each with the times and the load its "not judged" line named.
 var QuietNotJudged = quietNotJudged
+
+// QuietOverBudget names the packages a whole-suite output failed on the R1
+// budget, each with the times its line named and no load.
+var QuietOverBudget = quietOverBudget

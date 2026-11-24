@@ -3083,6 +3083,12 @@ since="since $base ($said), from $(git rev-parse --short "$from")"
 # when the run sets YARDR_CONFORMANCE (below). Nothing imports that package, so
 # its row alone selects it, for any path under conformance/, the README too,
 # because a row cannot tell a path the scripts read from one they do not.
+# This script's own row names internal/dispatch beside the root package: the
+# quiet run reads two of the lines this script prints (quietNotJudged and
+# quietOverBudget there), and that package's TestQuietReadsTheGatesR1Lines reads
+# their echoes from here. A landing of the script alone is the plain selection,
+# so without the row a reworded line would land with its reader unmoved, and the
+# quiet run, after the landing, would be what found it.
 reads='
 packs/starter/                 internal/pack internal/cli
 packs/design/                  contrib/assembly internal/pack
@@ -3100,7 +3106,7 @@ packs/website/                 internal/pack
 packs/testdata/                packs
 .yardr/flows/                 internal/cli internal/dispatch internal/store contrib/assembly packs
 .yardr/security_paths          internal/store
-.yardr/test                    .
+.yardr/test                    . internal/dispatch
 internal/                       internal/rpc
 internal/previewtest/          .
 internal/scripttest/           .

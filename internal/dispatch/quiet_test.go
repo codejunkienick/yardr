@@ -515,7 +515,7 @@ func notJudgedOf(t *testing.T, e store.Event) []dispatch.NotJudgedPackage {
 // naming the bound, with the same data, and then the count starts over.
 func TestQuietUnjudgedRefiresAndThirdFails(t *testing.T) {
 	y := newQuietYard(t)
-	verdict := "test: R1: yardr.dev/yardr/internal/store took 85.8 s in the run, 94.1 s alone: over budget, loaded machine (load 40.59 on 10 cores), not judged\n"
+	verdict := "test: R1: not judged: yardr.dev/yardr/internal/store took 85.8 s in the run, 94.1 s alone: over budget, loaded machine (load 40.59 on 10 cores)\n"
 	closing := "test: sh .yardr/test @ slow123: not judged, 54 packages ok, 0 failed\n"
 	out := "ok  \tyardr.dev/yardr/internal/cli\t1.0s\n" + verdict + closing
 	refused := []dispatch.NotJudgedPackage{
@@ -594,7 +594,7 @@ func TestQuietUnjudgedBoundResetsAfterAJudgedRun(t *testing.T) {
 		NotJudged: []dispatch.NotJudgedPackage{
 			{Package: "yardr.dev/yardr/internal/store", Run: "85.8", Alone: "94.1", Load: "load 40.59 on 10 cores"},
 		},
-		Outputs: map[string]string{dispatch.QuietRunKey: "test: R1: yardr.dev/yardr/internal/store took 85.8 s in the run, 94.1 s alone: over budget, loaded machine (load 40.59 on 10 cores), not judged\n"}}
+		Outputs: map[string]string{dispatch.QuietRunKey: "test: R1: not judged: yardr.dev/yardr/internal/store took 85.8 s in the run, 94.1 s alone: over budget, loaded machine (load 40.59 on 10 cores)\n"}}
 	ctx := context.Background()
 	y.land(t, "before the judged history")
 	// Two refused runs, then a judged one, as the log told them: each
@@ -728,9 +728,9 @@ func TestQuietTestsNamesTheFailingTests(t *testing.T) {
 // failed" line refuses nothing, and a run with no refusal names none.
 func TestQuietNotJudgedNamesTheRefusedPackages(t *testing.T) {
 	out := "ok  \tyardr.dev/yardr/internal/cli\t1.0s\n" +
-		"test: R1: yardr.dev/yardr/internal/store took 85.8 s in the run, 94.1 s alone: over budget, loaded machine (load 40.59 on 10 cores), not judged\n" +
-		"test: R1: yardr.dev/yardr/internal/pack took 61.3 s in the run, 66.6 s alone: over budget, loaded machine (load 72.4 on 10 cores), not failed\n" +
-		"test: R1: yardr.dev/yardr/internal/bdp took 61.1 s in the run, 66.6 s alone: over budget, loaded machine (load 26.4 on 10 cores), not judged\n"
+		"test: R1: not judged: yardr.dev/yardr/internal/store took 85.8 s in the run, 94.1 s alone: over budget, loaded machine (load 40.59 on 10 cores)\n" +
+		"test: R1: not failed: yardr.dev/yardr/internal/pack took 61.3 s in the run, 66.6 s alone: over budget, loaded machine (load 72.4 on 10 cores)\n" +
+		"test: R1: not judged: yardr.dev/yardr/internal/bdp took 61.1 s in the run, 66.6 s alone: over budget, loaded machine (load 26.4 on 10 cores)\n"
 	want := []dispatch.NotJudgedPackage{
 		{Package: "yardr.dev/yardr/internal/store", Run: "85.8", Alone: "94.1", Load: "load 40.59 on 10 cores"},
 		{Package: "yardr.dev/yardr/internal/bdp", Run: "61.1", Alone: "66.6", Load: "load 26.4 on 10 cores"},
@@ -740,6 +740,60 @@ func TestQuietNotJudgedNamesTheRefusedPackages(t *testing.T) {
 	}
 	if got := dispatch.QuietNotJudged("ok  \tyardr.dev/yardr/internal/cli\t1.0s\n"); got != nil {
 		t.Fatalf("QuietNotJudged of a run with no refusal = %+v, want none", got)
+	}
+}
+
+// gateLine is the line .yardr/test echoes that begins with prefix, as the gate
+// prints it with the sample's values where it interpolates $pkg, $secs, $alone
+// and $load. It reads the script and not a copy typed here: the fixtures of
+// the tests above say what this file believes the gate prints, and they stayed
+// green when the gate moved "not judged" to the front of its refusal and the
+// reader, still wanting it at the end, named no package.
+func gateLine(t *testing.T, prefix string, sample dispatch.NotJudgedPackage) string {
+	t.Helper()
+	script, err := os.ReadFile("../../.yardr/test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var echoes []string
+	for _, line := range strings.Split(string(script), "\n") {
+		if text, ok := strings.CutPrefix(strings.TrimSpace(line), `echo "`+prefix); ok {
+			echoes = append(echoes, prefix+strings.TrimSuffix(text, `"`))
+		}
+	}
+	if len(echoes) != 1 {
+		t.Fatalf(".yardr/test has %d lines that echo %q, want the one the quiet run reads: where the gate's line was reworded, reword its reader in quiet.go and this prefix with it", len(echoes), prefix)
+	}
+	return strings.NewReplacer("$pkg", sample.Package, "$secs", sample.Run, "$alone", sample.Alone, "$load", sample.Load).Replace(echoes[0])
+}
+
+// The quiet run reads two lines the gate prints: a strict run's refusal for a
+// package over budget alone on a loaded machine, and its failure of one over
+// budget alone on a quiet one. Each is read here from the script itself, so a
+// reword there fails this test instead of leaving the reader to name no
+// package: a refusal it cannot read is told as unjudged with nothing refused,
+// and a failure it cannot read keeps a run that a mid-run session made loaded
+// told as failed. The package's own tests give the readers typed lines, which
+// cannot notice the gate move.
+func TestQuietReadsTheGatesR1Lines(t *testing.T) {
+	sample := dispatch.NotJudgedPackage{Package: "yardr.dev/yardr/internal/store", Run: "85.8", Alone: "94.1", Load: "load 40.59 on 10 cores"}
+	for _, tc := range []struct {
+		name   string
+		prefix string
+		read   func(string) []dispatch.NotJudgedPackage
+		want   dispatch.NotJudgedPackage
+	}{
+		{"a refusal for load", "test: R1: not judged: ", dispatch.QuietNotJudged, sample},
+		// A failure is judged on quiet samples, so its line names no load.
+		{"a failure over budget", "test: $pkg took $secs s with -race, $alone s alone, over the 60 s budget", dispatch.QuietOverBudget,
+			dispatch.NotJudgedPackage{Package: sample.Package, Run: sample.Run, Alone: sample.Alone}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			line := gateLine(t, tc.prefix, sample)
+			if got := tc.read(line + "\n"); !slices.Equal(got, []dispatch.NotJudgedPackage{tc.want}) {
+				t.Fatalf("the reader of the gate's line %q names %+v, want %+v: .yardr/test and quiet.go have come apart", line, got, tc.want)
+			}
+		})
 	}
 }
 
@@ -1084,7 +1138,7 @@ func TestQuietExecRunAgainstARedBase(t *testing.T) {
 	// printf makes the tabs of go test's FAIL line: sh's echo does only in
 	// dash and macOS's sh, and prints a backslash and a t in bash and busybox.
 	over := "test: yardr.dev/fixture/slow took 70 s with -race, 65 s alone, over the 60 s budget (docs/testing.md R1), loaded machine (6.4)"
-	refused := "test: R1: yardr.dev/fixture/slow took 70 s in the run, 65 s alone: over budget, loaded machine (load 6.4 on 4 cores), not judged"
+	refused := "test: R1: not judged: yardr.dev/fixture/slow took 70 s in the run, 65 s alone: over budget, loaded machine (load 6.4 on 4 cores)"
 	for _, tc := range []struct {
 		name     string
 		script   string
