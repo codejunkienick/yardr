@@ -42,13 +42,15 @@ so a test's column and its membership can differ.
   (the union of the rest), to show the bound. Where the alone runs'
   union differs from the full run, the report says so: running apart
   covered more or less than running together.
+- Start floor: what every alone run pays before its test begins, and
+  how many runs it was read from (see Reading the seconds).
 - Candidates: tests with nothing unique, most expensive first, with
-  their combined time.
+  their combined time, net of the start floor and as run alone.
 - Near-duplicates: pairs of tests whose covered sets are at least 95%
   the same (Jaccard over blocks), as candidates to merge into one
   table-driven test.
-- Every test: outcome, wall seconds, statements covered, and statements
-  no other test covers.
+- Every test: outcome, wall seconds, net seconds, statements covered,
+  and statements no other test covers.
 
 A test that fails or skips alone keeps its row and its profile when the
 run wrote one; the verdict column marks it, since a failure alone is its
@@ -57,5 +59,33 @@ so it can neither accuse another test nor be accused, and the report
 names it.
 
 `go test ./contrib/testprune/` runs the analysis against made-up
-coverage sets: the greedy removal, the pair cutoff, and the profile
-reading.
+coverage sets and made-up times: the greedy removal, the pair cutoff,
+the profile reading, the start floor and the net seconds.
+
+## Reading the seconds
+
+Every alone run starts the test binary again, and the suite starts it
+once. Removing a test saves none of that start, but each alone run pays
+it. Where TestMain does real work first, such as building fixture
+repositories, most of an alone run's seconds are the start, and a sum
+over many candidates counts it once per candidate.
+
+The report reads that start as the start floor, the median of the 20
+cheapest alone runs. Any alone run can be one of the 20, whatever its
+outcome, since each paid the start. The median holds against one run
+that ended early, which the single cheapest would not. Net seconds are
+a run's seconds less the floor, never below 0.
+
+The Markdown prints the floor with the number of runs it read, and a
+`net (s)` column beside `time (s)` in both tables. It gives the
+candidates' combined time net first, with the raw time beside it. The
+JSON keeps every existing key and adds `startFloorSeconds`,
+`startFloorRuns`, `netSeconds` for each test, and `removalNetSeconds`
+and `testsNetSeconds` beside the raw totals.
+
+Net is a ceiling on what a test costs in the suite, not the saving. The
+floor is one number for the whole run, and a fresh process also pays
+for lazy setup and cold caches that the suite pays once. A test that
+runs in parallel in the suite saves less again, since it overlaps
+others. A package with fewer than 20 tests reads all of them, so its
+floor is its median test and its net seconds undercount.

@@ -92,8 +92,8 @@ func run(pkg, out string) error {
 	if err := writeReport(rep, mdPath, jsPath); err != nil {
 		return err
 	}
-	fmt.Printf("testprune: %d tests, %d candidates (%.1f s of %.1f s), coverage %.1f%% -> %.1f%%\n",
-		len(results), len(rep.removal), rep.removalSeconds, rep.testsSeconds,
+	fmt.Printf("testprune: %d tests, %d candidates (%.1f s of %.1f s net, start floor %.2f s), coverage %.1f%% -> %.1f%%\n",
+		len(results), len(rep.removal), rep.removalNetSeconds, rep.testsNetSeconds, rep.startFloor,
 		pct(rep.coveredAll, rep.total), pct(rep.coveredKept, rep.total))
 	fmt.Printf("testprune: wrote %s and %s\n", mdPath, jsPath)
 	return nil
