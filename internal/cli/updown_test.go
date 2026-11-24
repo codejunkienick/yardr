@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -1060,7 +1061,7 @@ func TestDownAsksAnUnreadableWorkingPaneForItsHandoff(t *testing.T) {
 	dir := t.TempDir()
 	calls := filepath.Join(dir, "calls")
 	bin := filepath.Join(dir, "herdr")
-	scripttest.Write(t, bin, `printf '%s\n' "$*" >> `+calls+`
+	scripttest.Write(t, bin, `printf '%s\n' "$*" >> "`+calls+`"
 case "$1 $2" in
   "agent get") echo '{"result":{"agent":{"agent":"claude","agent_status":"working"}}}' ;;
   "pane read") echo 'herdr pane read: no such pane' >&2; exit 1 ;;
@@ -1091,5 +1092,47 @@ esac
 	log, rerr := os.ReadFile(calls)
 	if rerr != nil || strings.Count(string(log), "agent prompt") != 1 || !strings.Contains(string(log), "yardr crew handoff yardmaster") {
 		t.Fatalf("herdr calls:\n%s\nwant the one handoff prompt (err %v)", log, rerr)
+	}
+}
+
+// A handoff prompt herdr rejects because the agent is not found is not a
+// stalled prompt: down still asks the live unknown member, but waits for no
+// handoff the missing agent can never write, and stops it all the same.
+func TestDownSkipsTheHandoffWaitForAnAgentHerdrCannotFind(t *testing.T) {
+	dir := t.TempDir()
+	calls := filepath.Join(dir, "calls")
+	bin := filepath.Join(dir, "herdr")
+	scripttest.Write(t, bin, `printf '%s\n' "$*" >> "`+calls+`"
+case "$1 $2" in
+  "agent get") echo '{"result":{"agent":{"agent":"claude","agent_status":"working"}}}' ;;
+  "pane read") echo 'herdr pane read: no such pane' >&2; exit 1 ;;
+  "agent prompt") echo '{"error":{"code":"agent_not_found","message":"agent yardmaster not found"},"id":"x"}' >&2; exit 1 ;;
+  "tab close") echo '{"result":{"type":"ok"}}' ;;
+  *) echo '{"result":{"type":"ok"}}' ;;
+esac
+`)
+	_, st, _, _, a, _ := downYard(t, map[string]string{"yardmaster": "idle"})
+	ctx := context.Background()
+	if err := st.CrewStarted(ctx, "yardmaster", map[string]any{"agent": "yardmaster", "tab": "w1:t1", "pane": "w1:p1", "kind": "claude"}); err != nil {
+		t.Fatal(err)
+	}
+	stub(t, &yardRunners, func(string, store.API) map[string]dispatch.Runner {
+		return map[string]dispatch.Runner{"herdr": &runner.Herdr{Bin: bin}}
+	})
+	cmd := a(false).rootCmd()
+	var warned bytes.Buffer
+	cmd.SetErr(&warned)
+	if out, err := run(t, cmd, "down", "--yes", "--handoff-wait", "20ms"); err != nil {
+		t.Fatalf("down: %v\n%s", err, out)
+	}
+	if strings.Contains(warned.String(), "waiting up to") {
+		t.Fatalf("down waited for the handoff of an agent herdr cannot find:\n%s", warned.String())
+	}
+	log, rerr := os.ReadFile(calls)
+	if rerr != nil || strings.Count(string(log), "agent prompt") != 1 || !strings.Contains(string(log), "yardr crew handoff yardmaster") {
+		t.Fatalf("herdr calls:\n%s\nwant the one handoff prompt (err %v)", log, rerr)
+	}
+	if !strings.Contains(string(log), "tab close") {
+		t.Fatalf("herdr calls:\n%s\nwant the missing member's tab closed", log)
 	}
 }

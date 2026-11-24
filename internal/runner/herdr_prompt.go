@@ -164,10 +164,12 @@ const (
 // stalled does not say the text never reached the agent, so what is done
 // next is decided by where the pane shows it.
 //
-// A timeout, and any error herdr gives other than agent_blocked, is read as
-// a stall: the text may be in the pane, and the look tells. So is an answer
-// that names neither state. An error that is no answer of herdr's (it is
-// down, or missing) is returned: nothing is known of the prompt then.
+// A timeout, and any error herdr gives other than agent_blocked or
+// agent_not_found, is read as a stall: the text may be in the pane, and
+// the look tells. So is an answer that names neither state, and so is an
+// error from an unavailable herdr (it is down, or missing). An agent herdr
+// cannot find took no prompt: returned, so a caller that waits on a stalled
+// prompt (down's handoff wait) skips it like a gone one.
 func (h *Herdr) prompt(ctx context.Context, name, pane, text string) (took string, err error) {
 	raw, err := h.run(ctx, "agent", "prompt", name, text, "--wait", "--until", "working", "--until", "blocked",
 		"--timeout", strconv.FormatInt(promptBound.Milliseconds(), 10))
@@ -175,6 +177,11 @@ func (h *Herdr) prompt(ctx context.Context, name, pane, text string) (took strin
 	if errors.As(err, &herr) && herr.Code == "agent_blocked" {
 		// Refused before anything was typed: the snapshot stands.
 		return tookRefused, nil
+	}
+	if errors.As(err, &herr) && herr.Code == "agent_not_found" {
+		// No agent took the prompt, so none was typed: the snapshot
+		// stands, and this is no stall for the look to settle.
+		return "", err
 	}
 	// Typed, or an error that does not say it was not: the pass's snapshot
 	// of the pane no longer stands, and a later check reads the pane again.

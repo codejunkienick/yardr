@@ -113,6 +113,7 @@ var allowSerial = map[string]string{
 	"TestDownStopsAStartThatWasUnderway":                    "downYard",
 	"TestDownStopsCrewConversationSessions":                 "downYard",
 	"TestDownStopsTheYardsAgents":                           "downYard",
+	"TestDownSkipsTheHandoffWaitForAnAgentHerdrCannotFind":  "downYard,stub:yardRunners",
 	"TestDownWithHerdrsServerDown":                          "downYard,stub:herdrServer",
 	"TestEnvironmentNamesTheSessionOutsideAWorktree":        "t.Chdir",
 	"TestFakeToolsVersionTimeout":                           "fakeTools",

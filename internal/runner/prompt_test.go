@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -803,6 +804,22 @@ answer `+answer)
 	down := &Herdr{Bin: deafHerdrBin(t, `echo '{"error":{"code":"server_not_running","message":"no herdr server"}}' >&2; exit 1`)}
 	if err := down.Nudge(context.Background(), map[string]any{"agent": "b1"}, "x"); err != dispatch.ErrPromptStalled {
 		t.Errorf("herdr down: Nudge = %v, want %v", err, dispatch.ErrPromptStalled)
+	}
+}
+
+// A prompt herdr rejects because the agent is not found is no stall: no
+// agent took it, so down's handoff wait skips it like a gone one instead of
+// waiting out the whole wait for a handoff it can never write.
+func TestNudgeReturnsTheErrorOfAnAgentHerdrCannotFind(t *testing.T) {
+	t.Parallel()
+	bin := deafHerdrBin(t, `echo '{"error":{"code":"agent_not_found","message":"agent b1 not found"}}' >&2; exit 1`)
+	err := (&Herdr{Bin: bin}).Nudge(context.Background(), map[string]any{"agent": "b1"}, "write your handoff")
+	var herr *herdrError
+	if !errors.As(err, &herr) || herr.Code != "agent_not_found" {
+		t.Fatalf("Nudge of a missing agent = %v, want the agent_not_found error", err)
+	}
+	if errors.Is(err, dispatch.ErrPromptStalled) || errors.Is(err, dispatch.ErrAgentBlocked) {
+		t.Fatalf("Nudge of a missing agent = %v, which must read as neither stalled nor blocked", err)
 	}
 }
 
