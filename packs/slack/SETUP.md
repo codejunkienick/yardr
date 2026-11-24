@@ -147,7 +147,15 @@ yard if it differs.
    yardr bead ask <bead> - <<'ASK'
    Q: Whose mention the bot's is
    C: The user_id and bot_id yardr source check slack printed in step 4.
-   R: crew identity yardmaster --source slack --id <user_id from step 4> --key <bot_id from step 4>
+   G: crew
+   G: identity
+   G: yardmaster
+   G: --source
+   G: slack
+   G: --id
+   G: <user_id>
+   G: --key
+   G: <bot_id>
    ASK
    ```
    The key is the bot id because the echo of the bot's own post may

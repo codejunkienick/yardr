@@ -136,7 +136,7 @@ func TestRunAskIsStoredInTheYardsForm(t *testing.T) {
 func TestRunAskRefusals(t *testing.T) {
 	t.Parallel()
 	y, _ := runYard(t)
-	const list = "--run takes a command of the list (" + "yardr peer add <name> <invite>, yardr peer allow <peer> --send <kinds> | --receive <kinds> | --expose <names> | --trust <name>@<peer>=<user> | --reach <name>@<peer>=<user> | --mail-limit <n>, yardr peer intake <peer> --depot <depot> --flow <flow> [--limit <n>] [--default], yardr peer identity <peer> <crew> --source <source> --id <id>, yardr peer rm <name>, yardr source set <source> calls_per_hour=<n>|updates_per_hour=<n>, yardr source grant <source> read|<call>|--preset <preset> --group <group>|--crew <crew member> [--as <user>], yardr source add <file>, yardr source ignore <source> --rm <id>, yardr source check <source> --user <user>, " + PackApplyUse + ", " + hookAddUse + ", yardr subscribe <user> yardr [--done] [--where <key>=<value>], yardr user set <user> tell=<parts>, yardr user key <user> <source>, yardr user add <name>, yardr user rm <name>, yardr user invite <name> --email <address> [--role operator] [--crew-talk yes|no], yardr user uninvite <name>, yardr crew add <name> kind=<kind> model=<model> preset=<preset> dir=<dir>, yardr group add <name> --runner <runner> [--limit <n>] [--set k=v ...], yardr crew set <name> open_threads=<sources> | set_state=<sources> | peers=<peers>, yardr crew identity <name> --source <source> [--id <id>] [--key <key>], yardr user identity <user> --source <source> [--id <id>] [--key <key>], yardr settings set <key> <value>, yardr peer rename <old> <new>, yardr bead update <bead> --originator <user>, yardr timer rm <id>, yardr up, yardr crew restart <name> [--for <user>], yardr depot test <depot>, yardr depot base <depot> <base>, yardr call <source> <call> [param=value ...] [--as <user>], yardr crew set <name> prompt=<file> | preset=<preset> | kind=<kind> | model=<model> | dir=<dir>, yardr depot add <name> --clone <url> [--kind git] [--base <branch>], " + devicePairUse + ", " + deviceRmUse + ", " + flowSetUse + ", " + groupRenameUse + ", yardr group set <name> prompt=<file> | cmd=<command> | preset=<preset> | effort=<level> | model=<model>, " + hookRmUse + ", " + linkMoveUse + ", " + packInstallUse + ", yardr peer set <name> --url <url>, " + routeSetUse + ", " + routeAddUse + ", " + sourceDestUse + ", " + sourceMoveUse + ", " + sourceRmUse + ", " + userLoginUse + ", " + userRoleUse + "): anything else is run directly, or typed by the operator in a terminal"
+	const list = "--run takes a command of the list (" + "yardr peer add <name> <invite>, yardr peer allow <peer> --send <kinds> | --receive <kinds> | --expose <names> | --trust <name>@<peer>=<user> | --reach <name>@<peer>=<user> | --mail-limit <n>, yardr peer intake <peer> --depot <depot> --flow <flow> [--limit <n>] [--default], yardr peer identity <peer> <crew> --source <source> --id <id>, yardr peer rm <name>, yardr source set <source> calls_per_hour=<n>|updates_per_hour=<n>, yardr source grant <source> read|<call>|--preset <preset> --group <group>|--crew <crew member> [--as <user>], yardr source add <file>, yardr source check <source> --user <user>, " + PackApplyUse + ", " + hookAddUse + ", yardr subscribe <user> yardr [--done] [--where <key>=<value>], yardr user set <user> tell=<parts>, yardr user key <user> <source>, yardr user add <name>, yardr user invite <name> --email <address> [--role operator] [--crew-talk yes|no], yardr user uninvite <name>, yardr crew add <name> kind=<kind> model=<model> preset=<preset> dir=<dir>, yardr group add <name> --runner <runner> [--limit <n>] [--set k=v ...], yardr crew set <name> open_threads=<sources> | set_state=<sources> | peers=<peers>, yardr user identity <user> --source <source> [--id <id>] [--key <key>], yardr settings set <key> <value>, yardr peer rename <old> <new>, yardr up, yardr depot test <depot>, yardr call <source> <call> [param=value ...] [--as <user>], yardr crew set <name> prompt=<file> | preset=<preset> | kind=<kind> | model=<model> | dir=<dir>, yardr depot add <name> --clone <url> [--kind git] [--base <branch>], " + devicePairUse + ", " + flowSetUse + ", yardr group set <name> prompt=<file> | cmd=<command> | preset=<preset> | effort=<level> | model=<model>, " + hookRmUse + ", " + packInstallUse + ", yardr peer set <name> --url <url>, " + sourceDestUse + ", " + sourceMoveUse + ", " + userLoginUse + ", " + userRoleUse + "): anything else is run directly, or typed by the operator in a terminal"
 	for _, c := range []struct {
 		name  string
 		ask   func(a *Ask)
@@ -219,7 +219,6 @@ func TestRunAskRefusals(t *testing.T) {
 func TestRunAskTakesBrackets(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct{ typed, want string }{
-		{"crew identity yardmaster --source github --key yardr[bot]", "yardr crew identity yardmaster --source github --key 'yardr[bot]'"},
 		{"user identity ada --source github --key=ada-app[bot]", "yardr user identity ada --source github --key 'ada-app[bot]'"},
 		{"crew add porter kind=claude model=opus[1m] preset=auto", "yardr crew add porter kind=claude 'model=opus[1m]' preset=auto"},
 		{"peer set airy --url http://[::1]:8790", "yardr peer set airy --url 'http://[::1]:8790'"},
@@ -245,19 +244,19 @@ func TestRunAskTakesBrackets(t *testing.T) {
 		want string
 	}{
 		{[]string{"peer", "set", "airy", "--url", "http://[::1]:8790"}, "yardr peer set airy --url 'http://[::1]:8790'"},
-		{[]string{"crew", "identity", "yardmaster", "--source", "github", "--key", "yardr'[bot]"}, `yardr crew identity yardmaster --source github --key 'yardr'\''[bot]'`},
+		{[]string{"user", "identity", "ada", "--source", "github", "--key", "yardr'[bot]"}, `yardr user identity ada --source github --key 'yardr'\''[bot]'`},
 	} {
 		if got := runCommandLine(c.argv); got != c.want {
 			t.Errorf("runCommandLine(%q) = %q, want %q", c.argv, got, c.want)
 		}
 	}
 	for _, c := range []struct{ typed, want string }{
-		{"crew identity yardmaster --source github --key 'yardr[bot]'", `'\'' is none of their characters`},
-		{`crew identity yardmaster --source github --key "yardr[bot]"`, `'"' is none of their characters`},
-		{"crew identity yardmaster --source github --key $yardr[bot]", `'$' is none of their characters`},
-		{"crew identity yardmaster --source github --key `yardr[bot]`", "'`' is none of their characters"},
-		{"crew identity yardmaster --source github --key yardr[bot](x)", `'(' is none of their characters`},
-		{"crew identity yardmaster --source github --key yardr [bot]", "one crew member, not 2 words"},
+		{"user identity ada --source github --key 'yardr[bot]'", `'\'' is none of their characters`},
+		{`user identity ada --source github --key "yardr[bot]"`, `'"' is none of their characters`},
+		{"user identity ada --source github --key $yardr[bot]", `'$' is none of their characters`},
+		{"user identity ada --source github --key `yardr[bot]`", "'`' is none of their characters"},
+		{"user identity ada --source github --key yardr[bot](x)", `'(' is none of their characters`},
+		{"user identity ada --source github --key yardr [bot]", "one user, not 2 words"},
 	} {
 		if _, _, err := parseRun([]string{c.typed}); err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("--run %q = %v, want %q", c.typed, err, c.want)
@@ -1041,135 +1040,6 @@ func TestDepotTestApproveStale(t *testing.T) {
 	}
 }
 
-// A depot base ask is stored with the depot, its base now and the
-// proposed one, and approving it sets the base exactly. The card is
-// routine: a base moves where beads start but widens nothing.
-func TestDepotBaseAskApprove(t *testing.T) {
-	t.Parallel()
-	y, _ := runYard(t)
-	if err := y.PutDepot(y.ctx, Depot{Name: "web", Path: "/srv/web", Base: "origin/main"}, "mckean"); err != nil {
-		t.Fatal(err)
-	}
-	seq := y.ask(t, Ask{Question: "Move the base?", To: "mckean",
-		Context: []string{"main moved to origin/other"},
-		Run:     &AskRun{Argv: []string{"depot base web origin/other"}}}, "yardmaster")
-	got := y.asked(t, seq)
-	want := AskRun{
-		Argv:        []string{"depot", "base", "web", "origin/other"},
-		Description: "Change a depot's base",
-		Does:        []string{"the base of the depot web becomes origin/other (now: origin/main)."},
-		Back:        "yardr depot base web origin/main",
-		BackBy:      "only the operator",
-		Seen:        map[string]string{"depot web": seen("origin/main")},
-	}
-	run := *got.Ask.Run
-	if !slices.Equal(run.Argv, want.Argv) || run.Description != want.Description || !slices.Equal(run.Does, want.Does) ||
-		run.Back != want.Back || run.BackBy != want.BackBy || !sameMap(run.Seen, want.Seen) || run.Test != "" {
-		t.Fatalf("the ask stores\n%+v\nwant\n%+v", run, want)
-	}
-	if len(got.Ask.Weight) != 0 {
-		t.Fatalf("the ask weighs %+v, want routine", got.Ask.Weight)
-	}
-	done, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", false, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if done.Result != "depot web: base origin/other" {
-		t.Fatalf("the approval recorded %q", done.Result)
-	}
-	if d, err := y.GetDepot(y.ctx, "web"); err != nil || d.Base != "origin/other" {
-		t.Fatalf("the depot holds %+v, %v", d, err)
-	}
-	evs, err := y.EventsOfKind(y.ctx, "depot_updated", 2)
-	if err != nil || len(evs) != 2 || evs[1].Data["base"] != "origin/other" {
-		t.Fatalf("depot_updated events = %+v, %v", evs, err)
-	}
-	y.approved(t, evs[1], seq)
-
-	// A depot with no base is taken back by nobody: no card clears one.
-	y2, _ := runYard(t)
-	if err := y2.PutDepot(y2.ctx, Depot{Name: "flat", Path: "/srv/flat"}, "mckean"); err != nil {
-		t.Fatal(err)
-	}
-	seq = y2.ask(t, Ask{Question: "Move the base?", To: "mckean",
-		Context: []string{"why"}, Run: &AskRun{Argv: []string{"depot base flat origin/main"}}}, "yardmaster")
-	run = *y2.asked(t, seq).Ask.Run
-	if !slices.Equal(run.Does, []string{"the base of the depot flat becomes origin/main (now: none set)."}) ||
-		run.Back != "the depot had no base, and no card clears one again" || run.BackBy != "nobody" {
-		t.Fatalf("the card holds %+v", run)
-	}
-}
-
-// A depot base ask is refused, storing nothing, for what the row refuses:
-// a depot the yard has not, a directory depot, a base that is no branch
-// name, and one that would change nothing.
-func TestDepotBaseRefusals(t *testing.T) {
-	t.Parallel()
-	y, _ := runYard(t)
-	if err := y.PutDepot(y.ctx, Depot{Name: "web", Path: "/srv/web", Base: "origin/main"}, "mckean"); err != nil {
-		t.Fatal(err)
-	}
-	if err := y.PutDepot(y.ctx, Depot{Name: "docs", Path: "/srv/docs", Kind: DepotDir}, "mckean"); err != nil {
-		t.Fatal(err)
-	}
-	for _, c := range []struct {
-		name string
-		argv []string
-		want string
-	}{
-		{"unknown depot", []string{"depot base north origin/main"}, "depot north: not found"},
-		{"a directory depot", []string{"depot base docs origin/main"}, "depot docs is a directory depot: it has no base"},
-		{"no branch name", []string{"depot base web -main"}, `depot web: base "-main" is not a branch name`},
-		{"would change nothing", []string{"depot base web origin/main"}, "is origin/main already, so the command would change nothing"},
-		{"no base in argv", []string{"depot base web"}, "one depot and one base, not 1 words"},
-		{"the operator asks", []string{"depot base web origin/other"}, "needs no approval: run it yourself"},
-	} {
-		actor := "yardmaster"
-		if c.name == "the operator asks" {
-			actor = "mckean"
-		}
-		ask := Ask{Question: "Move the base?", To: "mckean",
-			Context: []string{"why"}, Run: &AskRun{Argv: c.argv}}
-		if _, err := y.AddAsk(y.ctx, y.bead, ask, actor); err == nil || !strings.Contains(err.Error(), c.want) {
-			t.Errorf("%s = %v, want %q", c.name, err, c.want)
-		}
-	}
-	if notes, err := y.Notes(y.ctx, y.bead); err != nil || len(notes) != 0 {
-		t.Fatalf("the refused asks left %d notes, %v", len(notes), err)
-	}
-}
-
-// An approval is refused when the depot's base was set after the ask was
-// written: the card no longer matches, and nothing runs.
-func TestDepotBaseApproveStale(t *testing.T) {
-	t.Parallel()
-	y, _ := runYard(t)
-	if err := y.PutDepot(y.ctx, Depot{Name: "web", Path: "/srv/web", Base: "origin/main"}, "mckean"); err != nil {
-		t.Fatal(err)
-	}
-	seq := y.ask(t, Ask{Question: "Move the base?", To: "mckean",
-		Context: []string{"why"}, Run: &AskRun{Argv: []string{"depot base web origin/other"}}}, "yardmaster")
-	if err := y.PutDepot(y.ctx, Depot{Name: "web", Path: "/srv/web", Base: "origin/next"}, "mckean"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", false, nil); err == nil ||
-		!strings.Contains(err.Error(), "was written when the base of the depot web was another: it was changed since") {
-		t.Fatalf("approving stale = %v", err)
-	}
-	if d, err := y.GetDepot(y.ctx, "web"); err != nil || d.Base != "origin/next" {
-		t.Fatalf("the refused approval set %+v, %v", d, err)
-	}
-	// Set to the proposed one instead, and there is nothing left to
-	// change: the ask stays open, to be declined.
-	if err := y.PutDepot(y.ctx, Depot{Name: "web", Path: "/srv/web", Base: "origin/other"}, "mckean"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", false, nil); err == nil ||
-		!strings.Contains(err.Error(), "proposes origin/other as the base of the depot web, and it is set already: nothing is left to change") {
-		t.Fatalf("approving applied = %v", err)
-	}
-}
-
 // Removing a link is a routine card: it names the link with its intakes,
 // its identities and what is queued for it, each with its count, and the
 // operator's approval unlinks exactly as the terminal command does. An
@@ -1727,8 +1597,8 @@ func TestRunAskPeerSet(t *testing.T) {
 	}
 }
 
-// A depot test and a depot base use the same permission check as PutDepot
-// for both the proposer and the operator.
+// A depot test uses the same permission check as PutDepot for both the
+// proposer and the operator.
 func TestRunAskDepotUsesItsStoreCheck(t *testing.T) {
 	t.Parallel()
 	y, _ := runYard(t)
@@ -1742,8 +1612,6 @@ func TestRunAskDepotUsesItsStoreCheck(t *testing.T) {
 	}{
 		{[]string{"depot test web"}, "go test ./...",
 			Depot{Name: "web", Path: "/srv/web", Base: "origin/main", Test: "go test ./..."}},
-		{[]string{"depot base web origin/other"}, "",
-			Depot{Name: "web", Path: "/srv/web", Base: "origin/other", Test: "make test"}},
 	} {
 		rc, argv, err := parseRun(c.command)
 		if err != nil {

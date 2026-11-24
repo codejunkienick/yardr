@@ -184,7 +184,6 @@ calls:
 		{name: "hook add", run: AskRun{Argv: []string{"hook add bot --source crm"}}, want: []string{WeightTrust}},
 		{name: "user key", run: AskRun{Argv: []string{"user key ada crm"}}, want: []string{WeightCredential}},
 		{name: "user add", run: AskRun{Argv: []string{"user add eve"}}, want: []string{WeightTrust}},
-		{name: "user rm", run: AskRun{Argv: []string{"user rm ada"}}},
 		{name: "user invite", run: AskRun{Argv: []string{"user invite eve --email eve@example.net"}}, want: []string{WeightTrust}},
 		{name: "user uninvite", run: AskRun{Argv: []string{"user uninvite ada"}}},
 		{name: "user login first", run: AskRun{Argv: []string{"user login ada"}}, want: []string{WeightCode, WeightAsUser}},
@@ -206,7 +205,6 @@ calls:
 		}, run: AskRun{Argv: []string{"crew set yardmaster --unset peers"}}},
 		{name: "user identity", run: AskRun{Argv: []string{"user identity ada --source crm --id 7"}}, want: []string{WeightAsUser}},
 		{name: "user set tell", run: AskRun{Argv: []string{"user set ada tell=asks"}}},
-		{name: "timer rm", run: AskRun{Argv: []string{"timer rm t1"}}},
 	} {
 		if c.prep != nil {
 			c.prep()
@@ -260,7 +258,7 @@ calls:
 	}
 
 	// Every other row is routine whatever it is asked.
-	weighty := []string{"peer add", "peer set", "peer allow", "source set", "source grant", "source add", "pack apply", "pack install", "hook add", "user key", "user add", "user invite", "user login", "crew add", "group add", "group set", "crew set", "user identity", "depot test", "depot add", "call", "settings set", "hook rm", "user set role", "source move", "user device pair", "route set", "route add", "flow set"}
+	weighty := []string{"peer add", "peer set", "peer allow", "source set", "source grant", "source add", "pack apply", "pack install", "hook add", "user key", "user add", "user invite", "user login", "crew add", "group add", "group set", "crew set", "user identity", "depot test", "depot add", "call", "settings set", "hook rm", "user set role", "source move", "user device pair", "flow set"}
 	for _, c := range runList {
 		// The two forms of user set are two rows of one command's words.
 		name := strings.Join(c.words, " ")

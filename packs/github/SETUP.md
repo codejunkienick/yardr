@@ -111,18 +111,24 @@ file's.
    yardr crew identity <name> --source github --key <login>
    yardr crew identity <name> --source github --key '<slug>[bot]'
    ```
-   A crew member setting itself up proposes the login instead, from its
-   session, and the operator approves it on the card:
+   The yardmaster files the command as a general card, which the operator
+   approves; another crew member asks the yardmaster for it by mail:
    ```sh
    yardr bead ask <bead> - <<'ASK'
-   Q: Who am I on GitHub?
-   C: Mentions and assignments of this login on GitHub should reach me.
-   R: crew identity <name> --source github --key <login>
+   Q: Who is <name> on GitHub?
+   C: Mentions and assignments of this login on GitHub should reach <name>.
+   G: crew
+   G: identity
+   G: <name>
+   G: --source
+   G: github
+   G: --key
+   G: <login>
    ASK
    ```
-   A bot login (`<slug>[bot]`) has characters no run ask carries, so it
-   stays typed. A login is kept lowercase, however it was typed. What the
-   bot does is then its own, and @\<slug\> in a comment mentions it.
+   A bot login (`<slug>[bot]`) rides as one word, as typed. A login is
+   kept lowercase, however it was typed. What the bot does is then its
+   own, and @\<slug\> in a comment mentions it.
 5. **The grants.** Opening issues and setting their status are the
    operator's to grant:
    ```sh

@@ -3,7 +3,7 @@
 // one is the operator's, and a run ask may propose it by cloning a
 // repository (runask_depotadd.go); changing what one holds is the
 // operator's too, and a run ask may propose a held depot's test command
-// or its base (runask_depot.go).
+// (runask_depot.go).
 package store
 
 import (
@@ -102,11 +102,11 @@ func (s *Store) PutDepot(ctx context.Context, r Depot, actor string) error {
 }
 
 // putDepot is PutDepot inside the transaction, so that an approved run
-// ask changes the test command or the base in the write that records its
-// approval: by is then the ask it was approved on, which the event
-// carries. Changing the test command or the base is the operator's, and
-// a run ask may propose it; the path and the kind are the operator's
-// alone. Adding a depot is the operator's and a run ask may propose it
+// ask changes the test command in the write that records its approval:
+// by is then the ask it was approved on, which the event carries.
+// Changing the test command is the operator's, and a run ask may propose
+// it; the base, the path and the kind are the operator's alone. Adding a
+// depot is the operator's and a run ask may propose it
 // (ActAddDepot), which covers a test command named with it: the depot
 // add card shows that command whole.
 func (w *wtx) putDepot(ctx context.Context, r Depot, actor string, by *approvedOn) error {

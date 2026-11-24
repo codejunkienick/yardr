@@ -655,8 +655,7 @@ func (w *wtx) unignoreSender(ctx context.Context, name, sender, actor string, by
 // (yardr source ignore <source> --rm <id>), so its next delivery is
 // heard again: under unknown a fresh mapping card is offered, under
 // allow it is heard as an outsider. It is the operator's alone, refused
-// from an agent pane, and the same write an approval of the row's card
-// runs.
+// from an agent pane.
 func (s *Store) UnignoreSource(ctx context.Context, name, sender, actor string) error {
 	return s.write(func(w *wtx) error {
 		return w.unignoreSender(ctx, name, sender, actor, nil)
@@ -861,10 +860,9 @@ func (s *Store) DeleteSource(ctx context.Context, name, actor string) error {
 	})
 }
 
-// deleteSource is DeleteSource inside the transaction, so that an
-// approved run ask removes the source in the write that records its
-// approval: by is then the ask it was approved on, which the event
-// carries, as hook_removed does.
+// deleteSource is DeleteSource inside the transaction: by is the ask the
+// removal was approved on, which the event carries, as hook_removed does,
+// and nil for a removal typed at a terminal.
 func (w *wtx) deleteSource(ctx context.Context, name, actor string, by *approvedOn) error {
 	// Alone: removing a source also removes the files of its commands
 	// from disk, which no write of the store takes back.

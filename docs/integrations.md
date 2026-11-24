@@ -202,16 +202,16 @@ profile key (`@yardr`) when it carries markdown only, so a Linear identity
 wants both. GitHub's reports logins in lowercase, so a GitHub identity is
 `--key <login>`; a GitHub App's is `--key '<slug>[bot]'`, and `@<slug>`
 mentions it. Saying who a crew member is in a source is the operator's,
-and a crew member that needs its identity set proposes the command with a
-run ask (`yardr bead ask <id> -` with `Q:`, `C:` and `R: crew identity
-<name> --source <source> --id <id> --key <key>` lines on stdin,
-[chat.md](chat.md#questions-for-you)): the card says which crew member and
-which source, and that mentions and assignments of the id or key there
-will be addressed to it. A source the yard declares not, and a crew
-member the yard has not, are refused. A run ask is split at spaces and
-quotes nothing, so a GitHub App's login goes in as it is, `--key
-<slug>[bot]`, with no quotes around it; the card shows the command as a
-terminal takes it, with that word in quotes, `--key '<slug>[bot]'`.
+and a crew member that needs its identity set asks the yardmaster, who
+files the command as a general card (`yardr bead ask <id> -` with `Q:`,
+`C:` and a `G:` line for each word of `crew identity <name> --source
+<source> --id <id> --key <key>`, [chat.md](chat.md#questions-for-you)):
+the card shows the command whole and unchecked, and the operator
+approves or declines it. A source the yard declares not, and a crew
+member the yard has not, are refused when the command runs. A general
+card's words are verbatim and no quoting is parsed, so a GitHub App's
+login goes in as it is, `--key <slug>[bot]`, one word with no quotes
+around it.
 
 With that, for each crew member subscribed to the source:
 
@@ -1182,9 +1182,10 @@ for it, as for a host.
   as one card instead (`yardr bead ask <id> - --setup <pack> --crew <crew
   member> --recommend <n>`, with `Q:`, `C:` and `W:` lines on stdin,
   [chat.md](chat.md#setting-up-a-packs-sources)): the apply, the account
-  and the preset grants together. A source is
-  removed on a card too (`source rm <name>`), and its records and its
-  links move to another source on one (`source move`, `link move`). Every
+  and the preset grants together. A source's records move to another
+  source on a card of their own (`source move`); removing a source
+  (`source rm <name>`) and moving its links (`link move`) ride the general
+  card ([chat.md](chat.md#questions-for-you)). Every
   other command of a source stays the operator's to type in a terminal:
   `source set env_file=` and `mint_command=`, and `source key` (a key is
   asked for with a secret ask). A source's destination moves on its own
@@ -1718,8 +1719,8 @@ The ignored senders of a source are listed by `yardr source show
 source ignore <source> --rm <id>`: un-ignoring hears the sender again,
 a fresh card under unknown, as an outsider under allow. Removing is
 the operator's alone, refused from an agent's pane, and a crew member
-that needs an entry removed proposes the command with a run ask
-([chat.md](chat.md#questions-for-you)); adding to the list happens only
+that needs an entry removed asks the yardmaster, who files the command as
+a general card ([chat.md](chat.md#questions-for-you)); adding to the list happens only
 by picking nobody on a card. The one write that maps a member id -- a
 user or someone-new pick, or `yardr user identity` typed in a
 terminal -- removes that id from the list in the same write; removing
@@ -2870,9 +2871,9 @@ them whole):
   files.
 - **The identity** is the bot's `user_id` with its `bot_id` as the
   key, both read from `yardr source check slack`, which prints the
-  check call's selected fields: `yardr bead ask <bead> -` with the line
-  `R: crew identity yardmaster --source slack --id <user_id> --key <bot_id>`
-  on stdin.
+  check call's selected fields: `yardr bead ask <bead> -` with a `G:` line
+  for each word of `crew identity yardmaster --source slack --id <user_id>
+  --key <bot_id>` on stdin, a general card.
   Mentions arrive as member ids, matched exactly; the key is what the
   echo of the bot's own post may carry alone, and with both set the
   yard drops its own posts before hearing, with no mapping card. A

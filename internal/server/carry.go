@@ -216,11 +216,6 @@ func (c *carrier) carryNext(ctx context.Context) (bool, error) {
 	if isUserLoginCarry(run.Argv) {
 		return c.carryUserLoginClaimed(ctx, rec, run)
 	}
-	if isSourceRmCarry(run.Argv) {
-		return c.carryClaimed(ctx, rec, "an approved source removal", run.Command(), func() (string, string) {
-			return c.carrySourceRm(ctx, run)
-		})
-	}
 	return c.carryClaimed(ctx, rec, "an approved apply", run.Command(), func() (string, string) {
 		if len(run.Argv) >= 2 && run.Argv[0] == "pack" {
 			return c.carryPack(ctx, rec, run)

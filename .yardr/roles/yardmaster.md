@@ -125,7 +125,7 @@ Users:
   verified account gets none, and whoever invited the person tells them to
   sign in: say so when you report the invite. The card refuses a name a user
   already holds, so a plain user added under it goes first (`user rm
-  <name>`, also a run ask; a teammate leaves by `user uninvite <name>`). It
+  <name>`, a general card; a teammate leaves by `user uninvite <name>`). It
   refuses too when the yard has no edge to report to; there a person comes
   in by `user add` and a pairing Christopher opens. `yardr docs users` has
   the rest.

@@ -354,9 +354,8 @@ func (s *Store) RemoveDevice(ctx context.Context, user, name, actor string) (*De
 	return out, err
 }
 
-// removeDevice is RemoveDevice inside the transaction, so that an approved
-// run ask removes the device in the write that records its approval. by is
-// that ask, nil for a device removed by hand.
+// removeDevice is RemoveDevice inside the transaction. by is the ask the
+// removal was approved on, nil for a device removed by hand.
 func (w *wtx) removeDevice(ctx context.Context, user, name, actor string, by *approvedOn) (*Device, error) {
 	resolved, err := paneAuthor(w.Tx, callerOf(ctx), actor)
 	if err != nil {

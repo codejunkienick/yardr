@@ -22,10 +22,9 @@ import (
 // record says nothing of what it was called. A timer names no group.
 
 // ActRenameGroup is renaming a group: the operator's alone, as renaming a
-// peer is, and one a run ask may propose, so that the yardmaster asks and the
-// operator approves. It is declared and registered here and not beside the
-// other actions because policy.go stands at the file-size ceiling the test
-// gate holds (.yardr/test).
+// peer is. It is declared and registered here and not beside the other
+// actions because policy.go stands at the file-size ceiling the test gate
+// holds (.yardr/test).
 const ActRenameGroup Action = "rename a group"
 
 func init() { coreRules[ActRenameGroup] = ruleOperator }
@@ -45,8 +44,8 @@ type DepotUnserved struct {
 	Depot string `json:"depot"`
 }
 
-// GroupRenamed is what a rename of a group moved, as the command and the
-// card tell it. Every count is of what changed, and what a rename leaves
+// GroupRenamed is what a rename of a group moved, as the command tells it.
+// Every count is of what changed, and what a rename leaves
 // alone is not in it: the group's sessions go on running, so Sessions is how
 // many did, and none is released.
 type GroupRenamed struct {
@@ -75,8 +74,7 @@ type GroupRenamed struct {
 	Unserved []DepotUnserved `json:"unserved,omitempty"`
 }
 
-// String is what yardr group rename prints, and what its run ask answers: the
-// rename, and what followed it.
+// String is what yardr group rename prints: the rename, and what followed it.
 func (r GroupRenamed) String() string {
 	lines := []string{fmt.Sprintf("group %s is %s now: the old name is free, and reaches nothing", r.From, r.To)}
 	if len(r.Routes) > 0 {
@@ -104,7 +102,7 @@ func (r GroupRenamed) String() string {
 
 // groupRename is a rename as it is read from the yard's records, before
 // anything is written: each record that names the group, already as it will
-// be. The card says what it holds and the write puts it, so that the two
+// be. The report says what it holds and the write puts it, so that the two
 // cannot disagree about what a rename moves.
 type groupRename struct {
 	from, to string
@@ -529,7 +527,7 @@ func (w *wtx) renameUnserved(name, to string) ([]DepotUnserved, error) {
 	return out, nil
 }
 
-// report is what the plan moves, as the command and the card tell it.
+// report is what the plan moves, as the command tells it.
 func (p *groupRename) report() *GroupRenamed {
 	out := &GroupRenamed{From: p.from, To: p.to, Beads: len(p.beads), Sessions: p.live, Grants: len(p.grants),
 		Unserved: p.unserved}
@@ -731,9 +729,9 @@ func (s *Store) RenameGroup(ctx context.Context, name, to, actor string) (*Group
 	return out, nil
 }
 
-// renameGroup is RenameGroup inside the transaction, so that an approved run
-// ask renames the group in the write that records its approval: by is then
-// the ask it was approved on, which the event carries.
+// renameGroup is RenameGroup inside the transaction: by is the ask the
+// rename was approved on, which the event carries, and nil for a rename typed
+// at a terminal.
 func (w *wtx) renameGroup(ctx context.Context, name, to, actor string, by *approvedOn) (*GroupRenamed, error) {
 	if err := w.may(ctx, actor, ActRenameGroup, Object{Kind: KindGroup, Name: name, Ask: Askable}); err != nil {
 		return nil, err

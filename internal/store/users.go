@@ -630,9 +630,9 @@ func (w *wtx) clearUserCredential(name string, u *User) error {
 	return nil
 }
 
-// deleteUser is DeleteUser inside the transaction, so that an approved run
-// ask removes the user in the write that records its approval: by is then
-// the ask it was approved on, which the event carries.
+// deleteUser is DeleteUser inside the transaction: by is the ask the removal
+// was approved on, which the event carries, and nil for a removal no ask
+// approved.
 func (w *wtx) deleteUser(ctx context.Context, name, actor string, by *approvedOn) error {
 	if err := w.may(ctx, actor, ActRemoveUser, Object{Kind: KindUser, Name: name, Ask: Askable}); err != nil {
 		return err

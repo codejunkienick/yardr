@@ -86,6 +86,28 @@ func TestCarryGeneralRunsAsTyped(t *testing.T) {
 	if lines := resolvedLines(t, st, bead, seq); !strings.Contains(lines, "args:--home") {
 		t.Errorf("the card does not read what ran:\n%s", lines)
 	}
+	// The commands whose card was deleted ride the same way, flags among
+	// their words and all: a flagged one, a used one and a device's.
+	for _, words := range [][]string{
+		{"bead", "update", bead, "--originator", "ada"},
+		{"route", "add", "--stage", "review", "--group", "reviewers", "--depot", "web"},
+		{"user", "device", "rm", "ada", "phone"},
+	} {
+		seq, err := st.AddAsk(ctx, bead, generalAskOf(words...), "yardmaster")
+		if err != nil {
+			t.Fatalf("filing %q: %v", words, err)
+		}
+		if _, err := st.ApproveAsk(ctx, bead, seq, "mckean", true, nil); err != nil {
+			t.Fatal(err)
+		}
+		if did, err := c.carryNext(ctx); err != nil || !did {
+			t.Fatalf("carryNext of %q = %v, %v", words, did, err)
+		}
+		rec := carryState(t, st, bead, seq)
+		if want := "args:--home " + home + " --actor mckean " + strings.Join(words, " "); rec.State != store.CarryDone || !strings.Contains(rec.Result, want) {
+			t.Errorf("%q carried as %+v, want it done with %q", words, rec, want)
+		}
+	}
 }
 
 // The dropped list is exactly the five, and nothing else goes.

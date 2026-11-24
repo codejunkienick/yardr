@@ -27,6 +27,30 @@ func TestGeneralCommandNamed(t *testing.T) {
 			t.Errorf("%v carried: exit %d, %s", words, code, &errs)
 		}
 	}
+	// The commands whose card was deleted name themselves first and take
+	// their flags after, so the rule lets each of them run when carried.
+	a := &app{env: carried}
+	root := a.rootCmd()
+	for _, words := range [][]string{
+		{"group", "rename", "builders", "makers"},
+		{"route", "add", "--stage", "review", "--group", "reviewers", "--depot", "web"},
+		{"route", "set", "r1", "--group", "reviewers"},
+		{"crew", "identity", "yardmaster", "--source", "crm", "--id", "u1", "--key", "boss"},
+		{"source", "ignore", "talk", "--rm", "U999"},
+		{"user", "device", "rm", "ada", "phone"},
+		{"bead", "update", "yardr-1", "--originator", "ada"},
+		{"crew", "restart", "yardmaster", "--for", "ada"},
+		{"depot", "base", "web", "origin/other"},
+		{"link", "move", "--from-source", "linear", "--to-source", "lin-new"},
+		{"source", "rm", "crm"},
+		{"timer", "rm", "t1"},
+		{"user", "rm", "ada"},
+	} {
+		args := append([]string{"--home", home, "--actor", "mckean"}, words...)
+		if err := a.generalCommandNamed(root, args); err != nil {
+			t.Errorf("%v carried: %v", words, err)
+		}
+	}
 	var errs bytes.Buffer
 	if code := execute(&app{env: carried, stderr: &errs}, []string{"--home", home, "--actor", "mckean", "bead", "answer", "--help"}); code != 0 {
 		t.Errorf("a command named first, carried: exit %d, %s", code, &errs)

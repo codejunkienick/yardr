@@ -527,8 +527,8 @@ type linkSourceMove struct {
 // planLinkSourceMove reads and checks the move of the links of from to to,
 // refusing it where MoveLinkSource does: a URL the new source takes no issue
 // at, a bead that would link one issue twice, and a bead that would then
-// track two issues of the new source. It writes nothing, so a card can show
-// what a move would do by running it as the move does.
+// track two issues of the new source. It writes nothing, so it tells what a
+// move would do by running it as the move does.
 func (w *wtx) planLinkSourceMove(from, to string) (*linkSourceMove, error) {
 	var all []linkRow
 	if err := each(w.Tx, bLinks, "", func(_ []byte, l *linkRow) error {
@@ -602,10 +602,8 @@ func byBeadOf(ls []linkRow) map[string][]linkRow {
 }
 
 // moveLinkSource is MoveLinkSource inside the transaction, on sources
-// checkLinkSourceMove has passed, so that an approved run ask moves the
-// links in the write that records its approval. From a session's or a crew
-// member's pane the actor is the pane's (paneAuthor). It answers how many
-// links it moved.
+// checkLinkSourceMove has passed. From a session's or a crew member's pane
+// the actor is the pane's (paneAuthor). It answers how many links it moved.
 func (w *wtx) moveLinkSource(ctx context.Context, from, to, actor string) (int, error) {
 	resolved, err := paneAuthor(w.Tx, callerOf(ctx), actor)
 	if err != nil {

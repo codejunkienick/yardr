@@ -101,8 +101,9 @@ calls:
   viewer: { kind: read, request: { method: GET, path: /viewer } }
 `
 
-// runTalk hears by identity, for the source ignore row: fields.sender
-// holds a member id, matched against a user's identity in talk.
+// runTalk hears by identity, for the user identity and peer identity rows:
+// fields.sender holds a member id, matched against a user's identity in
+// talk.
 const runTalk = `name: talk
 base: https://talk.example.com
 credential: { env: TALK_TOKEN }
@@ -148,36 +149,6 @@ func seedAdded(t *testing.T, y *cliYard) {
 	}
 }
 
-// seedTalkIgnored declares talk on the yard and ignores U999 there
-// through a mapping card's nobody pick.
-func seedTalkIgnored(t *testing.T, y *cliYard) {
-	t.Helper()
-	ctx := context.Background()
-	if _, err := y.st.PutSource(ctx, "talk.yaml", runTalk, "jo"); err != nil {
-		t.Fatal(err)
-	}
-	if created, err := y.own.ClaimIdentity(ctx, "talk", "U999", "C1", "hi"); err != nil || !created {
-		t.Fatalf("ClaimIdentity = %v, %v", created, err)
-	}
-	q, err := y.st.UserAsks(ctx, "jo", "jo")
-	if err != nil || len(q.Open) != 1 {
-		t.Fatalf("open asks = %+v, %v", q, err)
-	}
-	view, err := y.st.Bead(ctx, q.Open[0].Bead)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pick := 0
-	for i, o := range view.Asks[0].Options {
-		if o.Label == store.MappingNobody {
-			pick = i + 1
-		}
-	}
-	if err := y.st.AnswerAsk(ctx, q.Open[0].Bead, q.Open[0].Ask, pick, "", "jo", false); err != nil {
-		t.Fatal(err)
-	}
-}
-
 // seedIntake gives the yard what an intake for the peer airy names: the
 // depot web, the flow incoming of the store, and a route that sends the
 // beads from airy to the group builders in its first stage.
@@ -211,22 +182,6 @@ func seedHook(t *testing.T, y *cliYard) {
 		t.Fatal(err)
 	}
 	if _, err := y.st.PutHook(context.Background(), store.Hook{Name: "linear", Source: "linear", SecretFile: file}, "jo"); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// seedLinks makes linear a source that links Linear's issues, adds lin-new
-// on the same host, and links the bead to an issue under linear, for the
-// link move row.
-func seedLinks(t *testing.T, y *cliYard, bead string) {
-	t.Helper()
-	ctx := context.Background()
-	for name, text := range map[string]string{"linear.yaml": linLink, "lin-new.yaml": strings.Replace(linLink, "name: linear", "name: lin-new", 1)} {
-		if _, err := y.st.PutSource(ctx, name, text, "jo"); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err := y.st.AddLink(ctx, bead, store.NewLink{Kind: store.LinkTracks, Source: "linear", URL: "https://linear.app/acme/issue/YRD-1"}, "jo"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -418,8 +373,8 @@ func TestBeadAskRunAndApprove(t *testing.T) {
 	// A GitHub App's bot logs in as <slug>[bot]: the command takes the
 	// brackets as typed, the card shows the command as a terminal takes it
 	// (in bead ask and in prime), and the approval carries them.
-	asked, err = y.as(t, "yardmaster", "ask", b.ID, "Is the yardmaster the bot?",
-		"--context", "its own comments come back to its inbox.", "--run", "crew identity yardmaster --source crm --key yardr[bot]")
+	asked, err = y.as(t, "yardmaster", "ask", b.ID, "Is jo the bot?",
+		"--context", "its own comments come back to its inbox.", "--run", "user identity jo --source crm --key yardr[bot]")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -427,19 +382,19 @@ func TestBeadAskRunAndApprove(t *testing.T) {
 	if _, err := fmt.Sscanf(asked, "ask %d on", &bot); err != nil {
 		t.Fatalf("bead ask printed %q: %v", asked, err)
 	}
-	if want := "to approve, yardr crew identity yardmaster --source crm --key 'yardr[bot]'\n"; !strings.HasSuffix(asked, want) {
+	if want := "to approve, yardr user identity jo --source crm --key 'yardr[bot]'\n"; !strings.HasSuffix(asked, want) {
 		t.Fatalf("bead ask printed %q, want it to end %q", asked, want)
 	}
 	shown, err = run(t, y.a.primeCmd(), "--bead", b.ID)
-	if want := "      yardr crew identity yardmaster --source crm --key 'yardr[bot]'\n"; err != nil || !strings.Contains(shown, want) {
+	if want := "      yardr user identity jo --source crm --key 'yardr[bot]'\n"; err != nil || !strings.Contains(shown, want) {
 		t.Fatalf("prime shows %q, %v, want it to hold %q", shown, err, want)
 	}
-	out, _, err = gated(t, y, false, strings.NewReader(""), b.ID, fmt.Sprint(bot), "--approve")
-	if err != nil || !strings.Contains(out, "crew member yardmaster is yardr[bot] in crm") {
+	out, _, err = gated(t, y, true, strings.NewReader(fmt.Sprint(bot)+"\n"), b.ID, fmt.Sprint(bot), "--approve")
+	if err != nil || !strings.Contains(out, "user jo is yardr[bot] in crm") {
 		t.Fatalf("approving the bot's login = %q, %v", out, err)
 	}
-	if m, err := y.st.GetCrew(context.Background(), "yardmaster"); err != nil || m.Identities["crm"] != (store.Identity{Key: "yardr[bot]"}) {
-		t.Fatalf("the crew member = %+v, %v", m, err)
+	if u, err := y.st.GetUser(context.Background(), "jo"); err != nil || u.Identities["crm"] != (store.Identity{Key: "yardr[bot]"}) {
+		t.Fatalf("the user = %+v, %v", u, err)
 	}
 
 	// The terminal's door sentence precedes the one-time pairing answer,
@@ -896,9 +851,6 @@ func TestRunListIsTheCLIs(t *testing.T) {
 		"yardr source set <source> base=<name>|host=<host>|site=<site>":     {"source set crm base=eu", "source set crm host=crm.example.net", "source set crm site=cloud-1", "source set crm base=", "source set crm host=", "source set crm site="},
 		"yardr source grant <source> read|<call>|--preset <preset> --group <group>|--crew <crew member> [--as <user>]": {"source grant crm note --crew yardmaster --group builders"},
 		"yardr source add <file>": {"source add " + addedFile, "source add " + replacedFile},
-		"yardr source ignore <source> --rm <id>": {
-			"source ignore talk --rm U999",
-		},
 		"yardr source check <source> --user <user>": {
 			"source check pushover --user ada",
 		},
@@ -909,7 +861,6 @@ func TestRunListIsTheCLIs(t *testing.T) {
 		"yardr user set <user> tell=<parts>": {"user set jo tell=asks,notifications"},
 		"yardr user key <user> <source>":     {"user key jo pushover"},
 		"yardr user add <name>":              {"user add eve"},
-		"yardr user rm <name>":               {"user rm ada"},
 		"yardr user invite <name> --email <address> [--role operator] [--crew-talk yes|no]": {"user invite eve --email eve@example.net"},
 		"yardr user uninvite <name>": {"user uninvite eve"},
 		"yardr user login <name>":    {"user login ada"},
@@ -925,33 +876,20 @@ func TestRunListIsTheCLIs(t *testing.T) {
 		},
 		groupSetUse: {"group set builders cmd=./deploy.sh", "group set builders effort=max", "group set builders effort=default", "group set builders model=opus"},
 		crewSetUse:  {"crew set yardmaster preset=bypass", "crew set yardmaster kind=claude model=opus preset=auto"},
-		"yardr crew identity <name> --source <source> [--id <id>] [--key <key>]": {
-			"crew identity yardmaster --source crm --id u1 --key boss",
-		},
 		"yardr user identity <user> --source <source> [--id <id>] [--key <key>]": {
 			"user identity ada --source crm --id u1",
 		},
-		"yardr settings set <key> <value>":                                    {"settings set max_sessions 20"},
-		"yardr peer rename <old> <new>":                                       {"peer rename airy north"},
-		"yardr group rename <old> <new>":                                      {"group rename builders workers"},
-		"yardr bead update <bead> --originator <user>":                        {"bead update yardmaster-journal --originator ada"},
-		"yardr timer rm <id>":                                                 {"timer rm t1"},
-		"yardr up":                                                            {"up"},
-		"yardr crew restart <name> [--for <user>]":                            {"crew restart yardmaster"},
-		"yardr depot test <depot>":                                            {"depot test web"},
-		"yardr depot base <depot> <base>":                                     {"depot base web origin/other"},
+		"yardr settings set <key> <value>": {"settings set max_sessions 20"},
+		"yardr peer rename <old> <new>":    {"peer rename airy north"},
+		"yardr up":                         {"up"},
+		"yardr depot test <depot>":         {"depot test web"},
 		"yardr depot add <name> --clone <url> [--kind git] [--base <branch>]": {"depot add shed --clone file:///repos/shed.git"},
-		"yardr route set <id> --group <group>":                                {"route set r1 --group reviewers"},
-		"yardr route add --stage <stage> --group <group> [--depot <depot>]":   {"route add --stage review --group reviewers --depot web"},
-		"yardr flow set <name>":                                               {"flow set code"},
-		"yardr call <source> <call> [param=value ...] [--as <user>]":          {"call crm note text=a test note"},
-		"yardr hook rm <name>":                                                {"hook rm linear"},
-		"yardr link move --from-source <source> --to-source <source>":         {"link move --from-source linear --to-source lin-new"},
-		"yardr source move <from> <to>":                                       {"source move crm linear"},
-		"yardr source rm <name>":                                              {"source rm crm"},
-		"yardr user device rm <user> <device>":                                {"user device rm ada phone"},
-		"yardr user device pair <user> <device> [--url <address>]":            {"user device pair ada tablet --url https://mac.example.net"},
-		"yardr user set <user> role=operator|member":                          {"user set ada role=operator"},
+		"yardr flow set <name>": {"flow set code"},
+		"yardr call <source> <call> [param=value ...] [--as <user>]": {"call crm note text=a test note"},
+		"yardr hook rm <name>":                                     {"hook rm linear"},
+		"yardr source move <from> <to>":                            {"source move crm linear"},
+		"yardr user device pair <user> <device> [--url <address>]": {"user device pair ada tablet --url https://mac.example.net"},
+		"yardr user set <user> role=operator|member":               {"user set ada role=operator"},
 	}
 	if len(asks) != len(store.RunCommands()) {
 		t.Errorf("this test has asks for %d commands, and the list has %d", len(asks), len(store.RunCommands()))
@@ -961,7 +899,7 @@ func TestRunListIsTheCLIs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"--run-flow", "F: a line of a flow set's flow", "--run-chain-line", "E: a chain line of a route set", "naming every depot it serves", "route set <id> --group <group>", "route add --stage <stage> --group <group>", "flow set <name>"} {
+	for _, want := range []string{"--run-flow", "F: a line of a flow set's flow", "flow set <name>"} {
 		if !strings.Contains(askHelp.Long, want) {
 			t.Errorf("yardr bead ask --help does not name %q", want)
 		}
@@ -1002,14 +940,6 @@ func TestRunListIsTheCLIs(t *testing.T) {
 		for _, command := range commands {
 			approved, ab := runYardCLI(t, "approved", key)
 			typed, tb := runYardCLI(t, "typed", key)
-			if use == "yardr source ignore <source> --rm <id>" {
-				// The entry the card removes stands on both yards
-				// before the marks below, put there by a mapping
-				// card's nobody pick, as only that pick adds one.
-				for _, y := range []*cliYard{approved, typed} {
-					seedTalkIgnored(t, y)
-				}
-			}
 			if use == "yardr source set <source> base=<name>|host=<host>|site=<site>" {
 				// The yard's crm declares no region bases and no
 				// template, so both yards declare them first; an
@@ -1053,10 +983,6 @@ func TestRunListIsTheCLIs(t *testing.T) {
 					seedHook(t, y)
 				}
 			}
-			if use == "yardr link move --from-source <source> --to-source <source>" {
-				seedLinks(t, approved, ab.ID)
-				seedLinks(t, typed, tb.ID)
-			}
 			if config, ok := map[string]map[string]any{
 				"group set builders effort=max":     {"kind": "codex"},
 				"group set builders effort=default": {"kind": "codex", "effort": "max"},
@@ -1069,15 +995,6 @@ func TestRunListIsTheCLIs(t *testing.T) {
 				for _, y := range []*cliYard{approved, typed} {
 					if err := y.st.PutGroup(context.Background(), store.Group{Name: "builders", Runner: "herdr", Config: config}, "jo"); err != nil {
 						t.Fatal(err)
-					}
-				}
-			}
-			if use == "yardr user device rm <user> <device>" {
-				for _, y := range []*cliYard{approved, typed} {
-					for _, device := range []string{"phone", "laptop"} {
-						if _, err := y.st.AddDevice(context.Background(), "ada", device, "jo"); err != nil {
-							t.Fatal(err)
-						}
 					}
 				}
 			}
@@ -1337,7 +1254,7 @@ func TestRunListIsTheCLIs(t *testing.T) {
 				}
 				continue
 			}
-			if use == "yardr depot test <depot>" || use == "yardr depot base <depot> <base>" {
+			if use == "yardr depot test <depot>" {
 				ctx := context.Background()
 				// A depot change runs in its own write, and its CLI verb
 				// takes the command as a word where the row carries it
@@ -1348,11 +1265,8 @@ func TestRunListIsTheCLIs(t *testing.T) {
 					t.Fatal(err)
 				}
 				runAsk := &store.AskRun{Argv: []string{command}}
-				wantDescription, wantResult, weighed := "Change a depot's base", "depot web: base origin/other", false
-				if use == "yardr depot test <depot>" {
-					runAsk.Test = "go test ./... && go vet ./..."
-					wantDescription, wantResult, weighed = "Change a depot's test command", "depot web: test: go test ./... && go vet ./...", true
-				}
+				runAsk.Test = "go test ./... && go vet ./..."
+				wantDescription, wantResult, weighed := "Change a depot's test command", "depot web: test: go test ./... && go vet ./...", true
 				seq, err := approved.st.AddAsk(ctx, ab.ID, store.Ask{Question: "Run it?", To: "jo", Context: []string{"why"},
 					Run: runAsk}, "yardmaster")
 				if err != nil {
@@ -1379,22 +1293,18 @@ func TestRunListIsTheCLIs(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if use == "yardr depot test <depot>" {
-					if d.Test != "go test ./... && go vet ./..." || d.Base != "origin/main" || d.Path != "/srv/web" {
-						t.Fatalf("%s: the depot holds %+v", use, d)
-					}
-				} else if d.Base != "origin/other" || d.Test != "make test" || d.Path != "/srv/web" {
+				if d.Test != "go test ./... && go vet ./..." || d.Base != "origin/main" || d.Path != "/srv/web" {
 					t.Fatalf("%s: the depot holds %+v", use, d)
 				}
 				continue
 			}
-			if use == "yardr route set <id> --group <group>" || use == "yardr route add --stage <stage> --group <group> [--depot <depot>]" || use == "yardr flow set <name>" {
+			if use == "yardr flow set <name>" {
 				ctx := context.Background()
-				// A route or flow card runs in its own write, and its
-				// command at a terminal takes flags and files the row
-				// carries beside it, so there is no typed state to
-				// compare: the row is held to its card, its recorded
-				// approval, and the rule or flow the approval left.
+				// A flow card runs in its own write, and its command at
+				// a terminal takes flags and files the row carries beside
+				// it, so there is no typed state to compare: the row is
+				// held to its card, its recorded approval, and the flow
+				// the approval left.
 				if err := approved.st.PutDepot(ctx, store.Depot{Name: "web", Path: "/srv/web", Base: "origin/main"}, "jo"); err != nil {
 					t.Fatal(err)
 				}
@@ -1402,36 +1312,16 @@ func TestRunListIsTheCLIs(t *testing.T) {
 					t.Fatal(err)
 				}
 				runAsk := &store.AskRun{Argv: []string{command}}
-				wantDescription, wantResult := "", ""
-				switch use {
-				case "yardr route set <id> --group <group>":
-					web := "web"
-					route, err := approved.st.AddRoute(ctx, store.Route{Stage: "new", Depot: &web, Group: "builders"}, "jo")
-					if err != nil {
-						t.Fatal(err)
-					}
-					runAsk.Argv = []string{"route set " + route.ID + " --group reviewers"}
-					wantDescription, wantResult = "Change where a route's beads go and keep the rest", "route "+route.ID+" saved"
-				case "yardr route add --stage <stage> --group <group> [--depot <depot>]":
-					if err := approved.st.PutGroup(ctx, store.Group{Name: "spares", Runner: "herdr", Config: map[string]any{"kind": "claude"}}, "jo"); err != nil {
-						t.Fatal(err)
-					}
-					if _, err := approved.st.AddRoute(ctx, store.Route{Stage: "review", Group: "spares"}, "jo"); err != nil {
-						t.Fatal(err)
-					}
-					wantDescription, wantResult = "Send open, unblocked beads in a stage to a group", "setting the yard-wide rule"
-				case "yardr flow set <name>":
-					f, err := store.ParseFlow("in -> work\nwork -> done\ndone terminal\n")
-					if err != nil {
-						t.Fatal(err)
-					}
-					f.Name = "code"
-					if _, err := approved.st.PutFlow(ctx, *f, "jo"); err != nil {
-						t.Fatal(err)
-					}
-					runAsk.Flow = `{"stages":["work","in","done"],"transitions":{"in":["work"],"work":["done"]},"terminal":["done"]}`
-					wantDescription, wantResult = "Set (replace) a named flow; depots and types point at it with 'yardr depot flow'", "flow code: 3 stages"
+				f, err := store.ParseFlow("in -> work\nwork -> done\ndone terminal\n")
+				if err != nil {
+					t.Fatal(err)
 				}
+				f.Name = "code"
+				if _, err := approved.st.PutFlow(ctx, *f, "jo"); err != nil {
+					t.Fatal(err)
+				}
+				runAsk.Flow = `{"stages":["work","in","done"],"transitions":{"in":["work"],"work":["done"]},"terminal":["done"]}`
+				wantDescription, wantResult := "Set (replace) a named flow; depots and types point at it with 'yardr depot flow'", "flow code: 3 stages"
 				seq, err := approved.st.AddAsk(ctx, ab.ID, store.Ask{Question: "Run it?", To: "jo", Context: []string{"why"},
 					Run: runAsk}, "yardmaster")
 				if err != nil {
@@ -1454,34 +1344,9 @@ func TestRunListIsTheCLIs(t *testing.T) {
 				if err != nil || !strings.Contains(done.Result, wantResult) {
 					t.Fatalf("%s approval = %+v, %v; want it to say %q", use, done, err, wantResult)
 				}
-				switch use {
-				case "yardr route set <id> --group <group>":
-					rs, err := approved.st.Routes(ctx)
-					if err != nil || len(rs) != 1 || rs[0].Group != "reviewers" {
-						t.Fatalf("%s: the routes hold %+v, %v", use, rs, err)
-					}
-				case "yardr route add --stage <stage> --group <group> [--depot <depot>]":
-					rs, err := approved.st.Routes(ctx)
-					if err != nil || len(rs) != 2 {
-						t.Fatalf("%s: the routes hold %+v, %v", use, rs, err)
-					}
-					var own bool
-					for _, r := range rs {
-						if r.Depot != nil && *r.Depot == "web" && r.Stage == "review" && r.Group == "reviewers" {
-							own = true
-						}
-						if r.Depot == nil && r.Group != "spares" {
-							t.Errorf("%s: the yard-wide rule moved: %+v", use, r)
-						}
-					}
-					if !own {
-						t.Errorf("%s: no own rule in web among %+v", use, rs)
-					}
-				case "yardr flow set <name>":
-					f, err := approved.st.GetFlow(ctx, "code")
-					if err != nil || !slices.Equal(f.Stages, []string{"work", "in", "done"}) {
-						t.Fatalf("%s: the flow holds %+v, %v", use, f, err)
-					}
+				f2, err := approved.st.GetFlow(ctx, "code")
+				if err != nil || !slices.Equal(f2.Stages, []string{"work", "in", "done"}) {
+					t.Fatalf("%s: the flow holds %+v, %v", use, f2, err)
 				}
 				continue
 			}
@@ -2381,10 +2246,9 @@ func TestBeadAskRunSourceAdd(t *testing.T) {
 // bead ask --run "depot test <depot>" carries --run-test beside the ask,
 // since --run quotes nothing; prime shows the card with the depot, the
 // command now and the proposed one whole, and the weighed approval sets
-// exactly that. --run "depot base <depot> <base>" rides argv, and approves
-// routine. A change between ask and approval makes it stale, and a crew
-// member's depot add --test stays refused.
-func TestBeadAskRunDepotTestAndBase(t *testing.T) {
+// exactly that. A change between ask and approval makes it stale, and a
+// crew member's depot add --test stays refused.
+func TestBeadAskRunDepotTest(t *testing.T) {
 	t.Parallel()
 	key := airyKey(t)
 	y, b := runYardCLI(t, "mac", key)
@@ -2445,22 +2309,6 @@ func TestBeadAskRunDepotTestAndBase(t *testing.T) {
 	}
 	if d, err := y.st.GetDepot(ctx, "web"); err != nil || d.Test != "make test" {
 		t.Fatalf("the refused approval set %+v, %v", d, err)
-	}
-
-	// The base rides argv, and approves with no terminal: routine.
-	if _, err := y.as(t, "yardmaster", "ask", b.ID, "Move the base?",
-		"--context", "main moved", "--run", "depot base web origin/other"); err != nil {
-		t.Fatal(err)
-	}
-	out, err = run(t, y.a.beadCmd(), "answer", b.ID, "4", "--approve")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(out, "depot web: base origin/other") {
-		t.Fatalf("the base approval printed:\n%s", out)
-	}
-	if out, err := run(t, y.a.depotCmd(), "show", "web"); err != nil || !strings.Contains(out, "base:  origin/other\n") {
-		t.Fatalf("depot show = %q, %v", out, err)
 	}
 
 	// A depot add rides --run with its test beside it too: prime shows

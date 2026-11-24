@@ -753,7 +753,6 @@ func TestDelegationSkipsCardWeight(t *testing.T) {
 		{[]string{"group", "add", "reviewers", "--runner", "herdr", "--set", "kind=codex"}, "", store.WeightCode},
 		{[]string{"hook", "add", "tracker", "--source", "linear"}, "", store.WeightTrust},
 		{[]string{"depot", "test", "shed"}, "sh .yardr/test", store.WeightCode},
-		{[]string{"depot", "base", "shed", "origin/trunk"}, "", ""},
 	}
 	for _, s := range skipped {
 		seq, err := y.api.AddAsk(y.ctx, b.ID, store.Ask{Question: "may I?", To: "jo", Context: []string{"a card of today's"}, Run: &store.AskRun{Argv: s.run, Test: s.test}}, "ada")

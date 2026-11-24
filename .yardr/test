@@ -2339,7 +2339,6 @@ internal/store/movesource.go moveCrewIdentitiesAndGrants bCrew 1 top told at mov
 internal/store/movesource.go moveSubscriptions bCrew 1 skip writes subscriptions alone and no crew fingerprint reads subscriptions
 internal/store/peerbeads.go changePeerSettings bCrew 1 top told at renamePeer in peerrename.go and deletePeer in peerremove.go where the peer is renamed or removed
 internal/store/peersource.go renamePeerFilters bCrew 1 skip writes subscriptions alone and no crew fingerprint reads subscriptions
-internal/store/runask_more.go runCrewRestart bCrew 1 skip writes a restart request alone and no crew fingerprint reads it
 internal/store/subscriptions.go setCrewIdentity bCrew 1 hook setCrewIdentity tells beside its identity_set
 internal/store/subscriptions_write.go writeCrewSubs bCrew 1 skip writes subscriptions alone and no crew fingerprint reads subscriptions
 internal/store/threads.go AllowOpening bCrew 1 hook AllowOpening tells beside its open_threads_granted

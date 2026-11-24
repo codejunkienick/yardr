@@ -96,13 +96,21 @@ means in Linear is a flow pack's to say, not this file's.
    ```sh
    yardr crew identity <name> --source linear --id <user id> --key <handle>
    ```
-   A crew member setting itself up proposes it instead, from its session,
-   and the operator approves it on the card:
+   The yardmaster files the command as a general card, which the operator
+   approves; another crew member asks the yardmaster for it by mail:
    ```sh
    yardr bead ask <bead> - <<'ASK'
-   Q: Who am I in Linear?
-   C: Mentions and assignments of this id and handle in Linear should reach me.
-   R: crew identity <name> --source linear --id <user id> --key <handle>
+   Q: Who is <name> in Linear?
+   C: Mentions and assignments of this id and handle in Linear should reach <name>.
+   G: crew
+   G: identity
+   G: <name>
+   G: --source
+   G: linear
+   G: --id
+   G: <user id>
+   G: --key
+   G: <handle>
    ASK
    ```
    A mention is matched by the handle when the delivery carries markdown

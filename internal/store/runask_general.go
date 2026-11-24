@@ -156,8 +156,8 @@ func generalEnvFileWord(word string) bool {
 
 // GeneralCardsSetting says the yardmaster may file a general run
 // card (this file): any yardr command no specific card fits, shown
-// whole and unchecked, for the operator to approve. Unset it is off;
-// turning it on is the operator's in a terminal, and it never rides a
+// whole and unchecked, for the operator to approve. Unset it is on;
+// turning it off is the operator's in a terminal, and it never rides a
 // card (settingAsk leaves it Alone).
 const GeneralCardsSetting = "general_cards"
 
@@ -202,8 +202,8 @@ func (w *wtx) askedGeneral(ctx context.Context, run AskRun, to, actor string) (*
 	if actor != ym {
 		return nil, fmt.Errorf("a general run card is the yardmaster's (%s) to file: this is %s", ym, or(actor, "nobody"))
 	}
-	if w.settingValue(GeneralCardsSetting) != "true" {
-		return nil, fmt.Errorf("general run cards are off: the operator turns them on in a terminal with yardr settings set %s true", GeneralCardsSetting)
+	if w.settingValue(GeneralCardsSetting) == "false" {
+		return nil, fmt.Errorf("general run cards are off: the operator turned them off in a terminal with yardr settings set %s false; they turn them on again there with yardr settings set %s true", GeneralCardsSetting, GeneralCardsSetting)
 	}
 	ops, err := operatorsIn(w.Tx)
 	if err != nil {

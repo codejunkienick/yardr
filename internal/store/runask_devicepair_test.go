@@ -26,6 +26,21 @@ func devicePairYard(t *testing.T) *askYard {
 	return y
 }
 
+// deviceNames are the names of user's devices, in order.
+func deviceNames(t *testing.T, y *askYard, user string) []string {
+	t.Helper()
+	ds, err := y.Devices(y.ctx, user)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, d := range ds {
+		names = append(names, d.Name)
+	}
+	slices.Sort(names)
+	return names
+}
+
 func devicePairAsk(command, to string) Ask {
 	return Ask{Question: "Pair the new tablet?", To: to, Context: []string{"ada's tablet arrived"},
 		Run: &AskRun{Argv: []string{command}}}
@@ -245,15 +260,15 @@ func runAskDevicePairSelf(t *testing.T) {
 	if _, err := y.DevicePairCloseSelf(y.ctx, "ada"); err != nil {
 		t.Fatalf("ada could not end the approval-opened pairing from her own device: %v", err)
 	}
-	// No other row carries the field: a device removal approved on the
-	// same yard answers none.
-	seq = y.ask(t, deviceRmAsk("user device rm ada phone", "mckean"), "yardmaster")
-	done, err = y.ApproveAsk(y.ctx, y.bead, seq, "mckean", false, nil)
+	// No other row carries the field: a user added on the same yard
+	// answers none.
+	seq = y.ask(t, listAsk("mckean", "user add jo"), "yardmaster")
+	done, err = y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if done.Pairing != nil {
-		t.Fatalf("a removal answered a pairing %+v", done.Pairing)
+		t.Fatalf("a user add answered a pairing %+v", done.Pairing)
 	}
 }
 

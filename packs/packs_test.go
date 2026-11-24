@@ -2730,7 +2730,7 @@ func TestSlackPack(t *testing.T) {
 		"networking outside\n   yardr, the operator's",
 		`--secret-hook slack --source slack`,
 		"R: hook add slack --source slack --unknown unknown",
-		"R: crew identity yardmaster --source slack --id <user_id from step 4> --key <bot_id from step 4>",
+		"G: crew\n   G: identity\n   G: yardmaster\n   G: --source\n   G: slack\n   G: --id\n   G: <user_id>\n   G: --key\n   G: <bot_id>",
 		"may\n   carry only `bot_id`",
 		"yardr bead ask <bead> - --secret slack --for-crew yardmaster <<'ASK'",
 		"yardr crew restart yardmaster",

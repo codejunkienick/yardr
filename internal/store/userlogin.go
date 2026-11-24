@@ -74,9 +74,8 @@ func LoginOf(user string, groups []Group, routes []Route, crew []CrewMember) Use
 }
 
 // Said is what removing user takes of their own login, in sentences, and
-// what stays: the card of user rm shows them before and yardr user rm after,
-// so that both say it in the same words. Nothing for a user with no login of
-// their own.
+// what stays: yardr user rm says them after the removal. Nothing for a user
+// with no login of their own.
 func (l UserLogin) Said(user string) []string {
 	var out []string
 	if len(l.Groups) > 0 {

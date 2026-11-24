@@ -176,7 +176,7 @@ token is revoked per device on the yard: `yardr user device rm <user> <device>`.
 
 **A lost phone, with no terminal at hand.** `yardr user device rm` needs a
 terminal on the yard's machine, and the operator of a hosted yard has none
-there. Ask the yardmaster for the card that removes the device (`user device
+there. Ask the yardmaster to file the command as a general card (`user device
 rm <user> <device>`, [chat.md](chat.md#questions-for-you)) and approve it from
 another paired device: the yard then refuses the phone's token itself. You can
 also cut the phone off at the edge, whose gate is your

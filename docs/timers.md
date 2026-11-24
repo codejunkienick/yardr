@@ -158,8 +158,8 @@ deleted) is dropped, with `timer_dropped`.
 
 `yardr timer rm <id>` removes a timer you set or that tells you; the
 operator removes any. A crew member that wants another's timer removed
-proposes it with a run ask ([chat.md](chat.md#questions-for-you)); one's
-own is removed directly.
+asks the yardmaster, who files the command as a general card
+([chat.md](chat.md#questions-for-you)); one's own is removed directly.
 
 ## Events
 

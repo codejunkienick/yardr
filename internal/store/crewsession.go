@@ -356,10 +356,8 @@ func (s *Store) RequestRestartFor(ctx context.Context, name, user, reason, rev, 
 	})
 }
 
-// requestRestartFor is the store write of RequestRestartFor, shared with
-// an approved run ask so both paths keep the same permission gate, session
-// change and event. by names the ask on an approved request; a terminal
-// request carries none.
+// requestRestartFor is the store write of RequestRestartFor. by names the
+// ask on an approved request; a terminal request carries none.
 func (w *wtx) requestRestartFor(ctx context.Context, r *CrewMember, st *CrewSession, user, reason, actor string, by *approvedOn) error {
 	resolved, err := paneAuthor(w.Tx, callerOf(ctx), actor)
 	if err != nil {

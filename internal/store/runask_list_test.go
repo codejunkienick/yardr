@@ -5,9 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"maps"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -2090,40 +2088,6 @@ func TestRunAskPeerAllowUsesItsStoreCheck(t *testing.T) {
 
 // A timer's owner and recipient are checked the same way by RemoveTimer
 // and by the run-ask row that proposes removing someone else's timer.
-func TestRunAskTimerRmUsesItsStoreCheck(t *testing.T) {
-	t.Parallel()
-	y, _ := runYard(t)
-	id := y.timer(t, "ada", "ada")
-	c, argv, err := parseRun([]string{"timer rm " + id})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var rowErr error
-	if err := y.write(func(w *wtx) error {
-		rowErr = c.check(y.ctx, w, argv, "yardmaster")
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	_, directErr := y.RemoveTimer(y.ctx, id, "yardmaster")
-	if rowErr == nil || directErr == nil || rowErr.Error() != directErr.Error() {
-		t.Fatalf("run row check = %v, direct timer removal = %v", rowErr, directErr)
-	}
-	if class, ok := IsOperatorOnly(rowErr); !ok || class != Askable {
-		t.Fatalf("timer removal refusal = %v; operator-only class is %v, %v", rowErr, class, ok)
-	}
-}
-
-// timer sets an hourly timer of to's by actor, and answers its id.
-func (y *askYard) timer(t *testing.T, to, actor string) string {
-	t.Helper()
-	tm, err := y.AddTimer(y.ctx, NewTimer{To: to, Reason: "stretch", Every: time.Hour}, actor)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return tm.ID
-}
-
 // The new rows refuse what the command would not do, in the store's own
 // words: what names nobody or nothing, names one that is taken or is no
 // user, peer or setting, or sets what is the operator's alone. What the
@@ -2131,7 +2095,6 @@ func (y *askYard) timer(t *testing.T, to, actor string) string {
 func TestRunAskNewRowsRefusals(t *testing.T) {
 	t.Parallel()
 	y, _ := runYard(t)
-	own := y.timer(t, "ada", "yardmaster")
 	sets, err := ParseSets([]string{"peers=airy"})
 	if err != nil {
 		t.Fatal(err)
@@ -2147,9 +2110,6 @@ func TestRunAskNewRowsRefusals(t *testing.T) {
 		{"user add mckean", "there is a user mckean already"},
 		{"user add yardmaster", "that is a crew member's name"},
 		{"user add eve bo", "one user, not 2 words"},
-		{"user rm", "one user, not 0 words"},
-		{"user rm mckean", "is the yard's operator and is not removed"},
-		{"user rm eve", "user eve: not found"},
 		{"crew set nobody peers=airy", "crew member nobody: not found"},
 		{"crew set yardmaster dir=/tmp", "is outside the yard's known places"},
 		{"crew set yardmaster peers=north", "peer north: not found"},
@@ -2160,17 +2120,9 @@ func TestRunAskNewRowsRefusals(t *testing.T) {
 		{"settings set operator eve", "may change a setting; this is yardmaster; it is the operator's alone"},
 		{"peer rename airy airy", "has that name already"},
 		{"peer rename eve north", "peer eve: not found"},
-		{"group rename eve north", "group eve: not found"},
-		{"group rename eve", "two names, not 1 words"},
-		{"group rename a b c", "two names, not 3 words"},
 		{"peer rm", "one peer, not 0 words"},
 		{"peer rm airy north", "one peer, not 2 words"},
 		{"peer rm eve", "peer eve: not found"},
-		{"bead update " + y.bead, "it names no --originator"},
-		{"bead update " + y.bead + " --originator eve", "--originator: user eve"},
-		{"timer rm", "one timer, not 0 words"},
-		{"timer rm nope", "timer nope: not found"},
-		{"timer rm " + own, "needs no approval: run it yourself"},
 	} {
 		if _, err := y.AddAsk(y.ctx, y.bead, listAsk("mckean", c.command), "yardmaster"); err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("--run %q = %v, want %q", c.command, err, c.want)
@@ -2178,55 +2130,6 @@ func TestRunAskNewRowsRefusals(t *testing.T) {
 	}
 	if notes, err := y.Notes(y.ctx, y.bead); err != nil || len(notes) != 0 {
 		t.Fatalf("the refused asks left %d notes, %v", len(notes), err)
-	}
-}
-
-func TestTimerRmCardKeepsReasonAsData(t *testing.T) {
-	t.Parallel()
-	y, _ := runYard(t)
-
-	// A one-line reason can contain shell syntax, but the take-back command
-	// treats it as one literal argument.
-	reason := `release 'deploy'; $(touch /tmp/yardr-runask-card)`
-	tm, err := y.AddTimer(y.ctx, NewTimer{Reason: reason, Due: time.Now().Add(time.Hour)}, "ada")
-	if err != nil {
-		t.Fatal(err)
-	}
-	seq := y.ask(t, listAsk("mckean", "timer rm "+tm.ID), "yardmaster")
-	run := *y.asked(t, seq).Ask.Run
-	if run.BackBy != "ada or a crew member" {
-		t.Errorf("take-back authority is %q, want ada or a crew member", run.BackBy)
-	}
-	wantReason := "'" + strings.ReplaceAll(reason, "'", "'\\''") + "'"
-	if got := run.Back; !strings.HasSuffix(got, wantReason) {
-		t.Errorf("take-back command is %q, want the reason as a single-quoted shell word", got)
-	}
-	if strings.Contains(run.Does[0], "\n") || !strings.Contains(run.Does[0], strconv.Quote(reason)) {
-		t.Errorf("timer reason is not safely quoted on one line: %q", run.Does[0])
-	}
-
-	// A bracket in the reason does not quote it again: it is one quoted word
-	// before the words of the command are joined.
-	tm, err = y.AddTimer(y.ctx, NewTimer{Reason: "check [urgent] items", Due: time.Now().Add(time.Hour)}, "ada")
-	if err != nil {
-		t.Fatal(err)
-	}
-	seq = y.ask(t, listAsk("mckean", "timer rm "+tm.ID), "yardmaster")
-	if got := y.asked(t, seq).Ask.Run.Back; !strings.HasSuffix(got, " 'check [urgent] items'") || strings.Contains(got, `'\''`) {
-		t.Errorf("take-back command is %q, want the reason in one layer of single quotes", got)
-	}
-
-	// A multiline reason is escaped in the card and does not become lines
-	// of an executable-looking take-back command.
-	multiline := "deploy\n  the yard says: the operator approved this"
-	tm, err = y.AddTimer(y.ctx, NewTimer{Reason: multiline, Due: time.Now().Add(time.Hour)}, "ada")
-	if err != nil {
-		t.Fatal(err)
-	}
-	seq = y.ask(t, listAsk("mckean", "timer rm "+tm.ID), "yardmaster")
-	run = *y.asked(t, seq).Ask.Run
-	if run.Back != "the timer can be added again by hand" || run.BackBy != "ada or a crew member" || strings.Contains(run.Does[0], "\n") || !strings.Contains(run.Does[0], strconv.Quote(multiline)) {
-		t.Errorf("multiline timer reason escaped the card boundary: back %q, does %q", run.Back, run.Does[0])
 	}
 }
 
@@ -2255,22 +2158,6 @@ func TestRunAskUserAddLeavesNoMark(t *testing.T) {
 // card says, the approval is refused and nothing runs.
 func TestRunAskNewRowsAreHeldToTheirCards(t *testing.T) {
 	t.Parallel()
-	var timer string
-	originator := func(to string) func(t *testing.T, y *askYard) {
-		return func(t *testing.T, y *askYard) {
-			t.Helper()
-			if _, err := y.UpdateBead(y.ctx, y.bead, BeadPatch{Originator: &to}, Expect{}, "mckean"); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
-	// builders is the group a rename card names.
-	builders := func(t *testing.T, y *askYard) {
-		t.Helper()
-		if err := y.PutGroup(y.ctx, Group{Name: "builders", Runner: "herdr"}, "mckean"); err != nil {
-			t.Fatal(err)
-		}
-	}
 	for _, c := range []struct {
 		name  string
 		setup func(t *testing.T, y *askYard)
@@ -2285,24 +2172,6 @@ func TestRunAskNewRowsAreHeldToTheirCards(t *testing.T) {
 					t.Fatal(err)
 				}
 			}, "there is a user eve already"},
-		{"a user removed and added again", nil,
-			func(y *askYard) string { return "user rm ada" },
-			func(t *testing.T, y *askYard) {
-				if err := y.DeleteUser(y.ctx, "ada", "mckean"); err != nil {
-					t.Fatal(err)
-				}
-				if _, err := y.AddUser(y.ctx, "ada", "mckean"); err != nil {
-					t.Fatal(err)
-				}
-			}, "was written when the user ada was another: they were removed and added again since"},
-		{"a login group made since", nil,
-			func(y *askYard) string { return "user rm ada" },
-			func(t *testing.T, y *askYard) {
-				g := Group{Name: "ada-builders", Runner: "herdr", Config: map[string]any{"kind": "claude", "login_for": "ada"}}
-				if err := y.PutGroup(y.ctx, g, "mckean"); err != nil {
-					t.Fatal(err)
-				}
-			}, "the yard would say \"Groups that carry their login go with them: ada-builders.\" now"},
 		{"a crew definition set since", nil,
 			func(y *askYard) string { return "crew set yardmaster peers=airy" },
 			func(t *testing.T, y *askYard) {
@@ -2310,33 +2179,6 @@ func TestRunAskNewRowsAreHeldToTheirCards(t *testing.T) {
 					t.Fatal(err)
 				}
 			}, "was written when the crew member yardmaster was another: its definition was set since"},
-		{"an identity set since",
-			func(t *testing.T, y *askYard) {
-				if _, err := y.PutSource(y.ctx, "crm.yaml", runCRM, "mckean"); err != nil {
-					t.Fatal(err)
-				}
-			},
-			func(y *askYard) string { return "crew identity yardmaster --source crm --id u1 --key boss" },
-			func(t *testing.T, y *askYard) {
-				if err := y.SetIdentity(y.ctx, "yardmaster", "crm", Identity{ID: "u2"}, "mckean"); err != nil {
-					t.Fatal(err)
-				}
-			}, "was written when the crew member yardmaster held another identity in crm: it was set since"},
-		{"an identity removed since",
-			func(t *testing.T, y *askYard) {
-				if _, err := y.PutSource(y.ctx, "crm.yaml", runCRM, "mckean"); err != nil {
-					t.Fatal(err)
-				}
-				if err := y.SetIdentity(y.ctx, "yardmaster", "crm", Identity{ID: "u1"}, "mckean"); err != nil {
-					t.Fatal(err)
-				}
-			},
-			func(y *askYard) string { return "crew identity yardmaster --source crm --id u2" },
-			func(t *testing.T, y *askYard) {
-				if err := y.SetIdentity(y.ctx, "yardmaster", "crm", Identity{}, "mckean"); err != nil {
-					t.Fatal(err)
-				}
-			}, "was written when the crew member yardmaster held another identity in crm: it was removed since"},
 		{"a setting changed since", nil,
 			func(y *askYard) string { return "settings set max_sessions 20" },
 			func(t *testing.T, y *askYard) {
@@ -2351,27 +2193,6 @@ func TestRunAskNewRowsAreHeldToTheirCards(t *testing.T) {
 					t.Fatal(err)
 				}
 			}, "peer airy: not found"},
-		{"a group renamed since", builders,
-			func(y *askYard) string { return "group rename builders makers" },
-			func(t *testing.T, y *askYard) {
-				if _, err := y.RenameGroup(y.ctx, "builders", "east", "mckean"); err != nil {
-					t.Fatal(err)
-				}
-			}, "group builders: not found"},
-		{"the new name taken since", builders,
-			func(y *askYard) string { return "group rename builders makers" },
-			func(t *testing.T, y *askYard) {
-				if err := y.PutGroup(y.ctx, Group{Name: "makers", Runner: "manual"}, "mckean"); err != nil {
-					t.Fatal(err)
-				}
-			}, "group makers is there already: a rename never replaces a group"},
-		{"a route to the group added since", builders,
-			func(y *askYard) string { return "group rename builders makers" },
-			func(t *testing.T, y *askYard) {
-				if _, err := y.AddRoute(y.ctx, Route{Stage: "new", Group: "builders"}, "mckean"); err != nil {
-					t.Fatal(err)
-				}
-			}, "the card is from before that changed"},
 		{"a peer's address set since", nil,
 			func(y *askYard) string { return "peer rm airy" },
 			func(t *testing.T, y *askYard) {
@@ -2429,20 +2250,6 @@ func TestRunAskNewRowsAreHeldToTheirCards(t *testing.T) {
 					t.Fatal(err)
 				}
 			}, "was written when the link with airy held other identities: one was removed since (peer_identity_removed"},
-		{"an originator changed since", nil,
-			func(y *askYard) string { return "bead update " + y.bead + " --originator ada" },
-			originator("mckean"), "is for no one now, and it is for mckean"},
-		{"an originator already", nil,
-			func(y *askYard) string { return "bead update " + y.bead + " --originator ada" },
-			originator("ada"), "it is for ada already: nothing is left to change"},
-		{"a timer gone since",
-			func(t *testing.T, y *askYard) { timer = y.timer(t, "mckean", "mckean") },
-			func(y *askYard) string { return "timer rm " + timer },
-			func(t *testing.T, y *askYard) {
-				if _, err := y.RemoveTimer(y.ctx, timer, "mckean"); err != nil {
-					t.Fatal(err)
-				}
-			}, "timer t1: not found"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			y, _ := runYard(t)
@@ -2453,231 +2260,6 @@ func TestRunAskNewRowsAreHeldToTheirCards(t *testing.T) {
 			c.since(t, y)
 			y.refusedStale(t, seq, c.want)
 		})
-	}
-}
-
-// A crew member's identity in a source is asked in the yard's form, shown
-// with what stood and the command that takes it back, approved in one
-// write through setCrewIdentity, and read back as stored. A second ask
-// changes it, and its take-back is the identity that stood.
-func TestRunAskCrewIdentity(t *testing.T) {
-	t.Parallel()
-	y := listYard(t)
-	seq := y.ask(t, listAsk("mckean", "crew identity --key boss --source crm yardmaster --id u1"), "yardmaster")
-	r := y.asked(t, seq)
-	run := r.Ask.Run
-	if want := []string{"crew", "identity", "yardmaster", "--source", "crm", "--id", "u1", "--key", "boss"}; !slices.Equal(run.Argv, want) {
-		t.Fatalf("the ask holds %q, want %q", run.Argv, want)
-	}
-	if want := []string{
-		"says the crew member yardmaster is u1 / boss in crm: the yard treats mentions and assignments of u1 / boss there as addressed to it.",
-		"It has no identity in crm now.",
-	}; !slices.Equal(run.Does, want) {
-		t.Fatalf("the card says %q, want %q", run.Does, want)
-	}
-	if run.Back != "yardr crew identity yardmaster --source crm --rm" || run.BackBy != "only the operator" {
-		t.Fatalf("the take-back is %q by %q", run.Back, run.BackBy)
-	}
-	if len(run.Seen["crew yardmaster"]) != 64 || len(run.Seen["source crm"]) != 64 {
-		t.Fatalf("the ask keeps seen %q, want SHA-256 hashes of the crew member and the source", run.Seen)
-	}
-	done, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", false, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if done.Result != "crew member yardmaster is u1 / boss in crm" {
-		t.Fatalf("the approval ran %q", done.Result)
-	}
-	member, err := y.GetCrew(y.ctx, "yardmaster")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := member.Identities["crm"]; got != (Identity{ID: "u1", Key: "boss"}) {
-		t.Fatalf("the crew member is %+v in crm, want u1 / boss", got)
-	}
-	evs, err := y.EventsOfKind(y.ctx, "identity_set", 10)
-	if err != nil || len(evs) == 0 {
-		t.Fatalf("identity_set events = %d, %v", len(evs), err)
-	}
-	y.approved(t, evs[len(evs)-1], seq)
-	seq = y.ask(t, listAsk("mckean", "crew identity yardmaster --source crm --key chief"), "yardmaster")
-	got := y.asked(t, seq).Ask.Run
-	if want := "yardr crew identity yardmaster --source crm --id u1 --key boss"; got.Back != want {
-		t.Fatalf("the second ask's take-back is %q, want %q", got.Back, want)
-	}
-	if want := "It is u1 / boss in crm now."; !slices.Contains(got.Does, want) {
-		t.Fatalf("the second card says %q, want it to hold %q", got.Does, want)
-	}
-
-	// A GitHub App's bot logs in as <slug>[bot]: the brackets stand in a key
-	// as typed, in either form of the flag, and the card shows the command
-	// as a terminal takes it, with the word in quotes.
-	seq = y.ask(t, listAsk("mckean", "crew identity yardmaster --source crm --key=yardr[bot]"), "yardmaster")
-	r = y.asked(t, seq)
-	if want := []string{"crew", "identity", "yardmaster", "--source", "crm", "--key", "yardr[bot]"}; !slices.Equal(r.Ask.Run.Argv, want) {
-		t.Fatalf("the bracketed ask holds %q, want %q", r.Ask.Run.Argv, want)
-	}
-	if want := "yardr crew identity yardmaster --source crm --key 'yardr[bot]'"; r.Ask.proposed().Command != want {
-		t.Fatalf("the card shows %q, want %q", r.Ask.proposed().Command, want)
-	}
-	done, err = y.ApproveAsk(y.ctx, y.bead, seq, "mckean", false, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if done.Result != "crew member yardmaster is yardr[bot] in crm" {
-		t.Fatalf("the approval ran %q", done.Result)
-	}
-	member, err = y.GetCrew(y.ctx, "yardmaster")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if bot := member.Identities["crm"]; bot != (Identity{Key: "yardr[bot]"}) {
-		t.Fatalf("the crew member is %+v in crm, want the bot's login", bot)
-	}
-
-	// What stands is the bot's login, so the next change is taken back by
-	// putting it back, and that line quotes it as the command's does.
-	seq = y.ask(t, listAsk("mckean", "crew identity yardmaster --source crm --key deputy"), "yardmaster")
-	got = y.asked(t, seq).Ask.Run
-	if want := "yardr crew identity yardmaster --source crm --key 'yardr[bot]'"; got.Back != want {
-		t.Fatalf("the take-back of the bot's login is %q, want %q", got.Back, want)
-	}
-	if want := "only the operator can take it back: yardr crew identity yardmaster --source crm --key 'yardr[bot]'"; got.TakenBack() != want {
-		t.Fatalf("the card takes it back with %q, want %q", got.TakenBack(), want)
-	}
-	// Stored identity keys may also contain a quote. The take-back escapes
-	// that data inside the shell word, preserving both it and the brackets.
-	if err := y.SetIdentity(y.ctx, "yardmaster", "crm", Identity{Key: "yardr'[bot]"}, "mckean"); err != nil {
-		t.Fatal(err)
-	}
-	seq = y.ask(t, listAsk("mckean", "crew identity yardmaster --source crm --key deputy"), "yardmaster")
-	got = y.asked(t, seq).Ask.Run
-	if want := `yardr crew identity yardmaster --source crm --key 'yardr'\''[bot]'`; got.Back != want {
-		t.Fatalf("the take-back of the quoted bot key is %q, want %q", got.Back, want)
-	}
-}
-
-// A chmod of a command copy under the identity's source after the ask
-// makes the approval stale: the card's source fingerprint holds the
-// whole destination inventory (path, sha256, mode), as a source set or
-// grant card's does since B2.
-func TestRunAskCrewIdentityStaleOnChmod(t *testing.T) {
-	t.Parallel()
-	y, _ := runYard(t)
-	dir := plantWired(t, y)
-	seq := y.ask(t, listAsk("mckean", "crew identity yardmaster --source wired --id u1"), "yardmaster")
-	if err := os.Chmod(filepath.Join(dir, "wired", "thread"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	y.refusedStale(t, seq, "was written from another declaration of the source wired: it was replaced since")
-}
-
-// Saying who a crew member is in a source is refused past its row: a
-// source the yard declares not, a crew member the yard has not (a user's
-// name among them), an asker who may say it themselves, an identity that
-// would change nothing, and a command beside the row's form.
-func TestRunAskCrewIdentityRefusals(t *testing.T) {
-	t.Parallel()
-	y := listYard(t)
-	for _, c := range []struct{ command, actor, want string }{
-		{"crew identity yardmaster --source erp --id u1", "yardmaster", "source erp: not found"},
-		{"crew identity nobody --source crm --id u1", "yardmaster", "crew member nobody: not found"},
-		{"crew identity ada --source crm --id u1", "yardmaster", "crew member ada: not found"},
-		{"crew identity yardmaster --source crm --id u1", "mckean", "needs no approval: run it yourself"},
-		{"crew identity yardmaster --id u1", "yardmaster", "one --source, not 0"},
-		{"crew identity yardmaster", "yardmaster", "one --source, not 0"},
-		{"crew identity yardmaster --source crm", "yardmaster", "--id and/or --key"},
-		{"crew identity yardmaster --source crm --id u1 --id u2", "yardmaster", "--id once, not 2 times"},
-		{"crew identity yardmaster --source crm --key b1 --key b2", "yardmaster", "--key once, not 2 times"},
-		{"crew identity yardmaster --source crm --source erp --id u1", "yardmaster", "one --source, not 2"},
-		{"crew identity yardmaster --source crm --id u1 --rm", "yardmaster", "crew identity with --rm is the operator's to type in a terminal"},
-		{"crew identity --source crm --id u1", "yardmaster", "one crew member, not 0 words"},
-		{"crew identity a b --source crm --id u1", "yardmaster", "one crew member, not 2 words"},
-		// A bracket is a character any word may have, so a name that holds one
-		// is refused as the name it is, and a comma beside it is still none.
-		{"crew identity yardmaster[bot] --source crm --id u1", "yardmaster", "crew member yardmaster[bot]: not found"},
-		{"crew identity yardmaster --source crm[bot] --id u1", "yardmaster", "source crm[bot]: not found"},
-		{"crew identity yardmaster --source crm --key a[b,ot]", "yardmaster", `',' is none of their characters`},
-	} {
-		if _, err := y.AddAsk(y.ctx, y.bead, listAsk("mckean", c.command), c.actor); err == nil || !strings.Contains(err.Error(), c.want) {
-			t.Errorf("--run %q as %s = %v, want %q", c.command, c.actor, err, c.want)
-		}
-	}
-	if err := y.SetIdentity(y.ctx, "yardmaster", "crm", Identity{ID: "u1", Key: "boss"}, "mckean"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := y.AddAsk(y.ctx, y.bead, listAsk("mckean", "crew identity yardmaster --source crm --id u1 --key boss"), "yardmaster"); err == nil || !strings.Contains(err.Error(), "is u1 / boss in crm already") {
-		t.Errorf("asking the identity that stands = %v, want it refused as changing nothing", err)
-	}
-	if notes, err := y.Notes(y.ctx, y.bead); err != nil || len(notes) != 0 {
-		t.Fatalf("the refused asks left %d notes, %v", len(notes), err)
-	}
-}
-
-// A key the source carries lowercase is stored folded however it was
-// typed, as a terminal stores it, and the card says so.
-func TestRunAskCrewIdentityFoldsTheKey(t *testing.T) {
-	t.Parallel()
-	y := listYard(t)
-	const folding = `name: folding
-base: https://folding.example.com/v1
-calls:
-  ping: { kind: read, request: { method: GET, path: /me } }
-identity:
-  fold: lower
-`
-	if _, err := y.PutSource(y.ctx, "folding.yaml", folding, "mckean"); err != nil {
-		t.Fatal(err)
-	}
-	seq := y.ask(t, listAsk("mckean", "crew identity yardmaster --source folding --key YardMaster"), "yardmaster")
-	run := y.asked(t, seq).Ask.Run
-	if want := "folding carries keys lowercase, so YardMaster is stored as yardmaster."; !slices.Contains(run.Does, want) {
-		t.Fatalf("the card says %q, want it to hold %q", run.Does, want)
-	}
-	if done, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", false, nil); err != nil {
-		t.Fatal(err)
-	} else if done.Result != "crew member yardmaster is yardmaster in folding" {
-		t.Fatalf("the approval ran %q", done.Result)
-	}
-	r, err := y.GetCrew(y.ctx, "yardmaster")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := r.Identities["folding"]; got != (Identity{Key: "yardmaster"}) {
-		t.Fatalf("the crew member is %+v in folding, want the folded key", got)
-	}
-}
-
-// Saying who a crew member is in a source is an operator-only action that
-// may be asked. Its run row must use the same check as SetIdentity for
-// both the proposer and the operator.
-func TestRunAskCrewIdentityUsesItsStoreCheck(t *testing.T) {
-	t.Parallel()
-	y := listYard(t)
-	c, argv, err := parseRun([]string{"crew identity yardmaster --source crm --id u1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if c.check == nil {
-		t.Fatal("crew identity has no asker permission check")
-	}
-	var askerErr, operatorErr error
-	if err := y.write(func(w *wtx) error {
-		askerErr = c.check(y.ctx, w, argv, "yardmaster")
-		operatorErr = c.check(y.ctx, w, argv, "mckean")
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	directErr := y.SetIdentity(y.ctx, "yardmaster", "crm", Identity{ID: "u1"}, "yardmaster")
-	if directErr == nil || askerErr == nil || askerErr.Error() != directErr.Error() {
-		t.Fatalf("run row check = %v, direct crew identity = %v", askerErr, directErr)
-	}
-	if class, ok := IsOperatorOnly(askerErr); !ok || class != Askable {
-		t.Fatalf("crew identity refusal = %v; operator-only class is %v, %v", askerErr, class, ok)
-	}
-	if operatorErr != nil {
-		t.Errorf("operator's crew identity check = %v, want allowed", operatorErr)
 	}
 }
 
@@ -2750,201 +2332,6 @@ func TestRunAskUpRefusals(t *testing.T) {
 	}
 	if notes, err := y.Notes(y.ctx, y.bead); err != nil || len(notes) != 0 {
 		t.Fatalf("the refused asks left %d notes, %v", len(notes), err)
-	}
-}
-
-// A crew restart is a card to the operator: a fresh session once the
-// current one is idle. The approval requests it as the command does, and
-// names the ask on the event.
-func TestRunAskCrewRestart(t *testing.T) {
-	t.Parallel()
-	y := listYard(t)
-	seq := y.ask(t, listAsk("mckean", "crew restart yardmaster"), "ada")
-	r := y.asked(t, seq)
-	run := r.Ask.Run
-	if want := []string{"crew", "restart", "yardmaster"}; !slices.Equal(run.Argv, want) {
-		t.Fatalf("the ask holds %q, want %q", run.Argv, want)
-	}
-	if want := []string{"starts a fresh session of yardmaster once the current one is idle."}; !slices.Equal(run.Does, want) {
-		t.Fatalf("the card says %q, want %q", run.Does, want)
-	}
-	if run.Back != "a requested restart cannot be taken back" || run.BackBy != "nobody" {
-		t.Fatalf("the take-back is %q by %q", run.Back, run.BackBy)
-	}
-	if len(run.Seen["crew yardmaster session"]) != 64 || len(run.Seen["crew yardmaster restart"]) != 64 {
-		t.Fatalf("the ask keeps seen %q, want SHA-256 hashes of the session and the request", run.Seen)
-	}
-	denied := errors.New("the policy refuses restarting crew")
-	y.SetPolicy(storePolicyFunc(func(ctx context.Context, tx *bolt.Tx, actor string, act Action, obj Object) error {
-		if act == ActRestartCrew {
-			return denied
-		}
-		return CorePolicy.May(ctx, tx, actor, act, obj)
-	}))
-	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", false, nil); err != denied {
-		t.Fatalf("the approval under a policy refusing restart = %v, want %v", err, denied)
-	}
-	y.SetPolicy(nil)
-	done, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", false, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if done.Result != "restart requested: yardmaster" {
-		t.Fatalf("the approval ran %q", done.Result)
-	}
-	member, err := y.GetCrew(y.ctx, "yardmaster")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if member.RestartRequested != "requested by mckean" {
-		t.Fatalf("the crew member's restart is %q", member.RestartRequested)
-	}
-	evs, err := y.EventsOfKind(y.ctx, "crew_restart_requested", 10)
-	if err != nil || len(evs) == 0 {
-		t.Fatalf("crew_restart_requested events = %d, %v", len(evs), err)
-	}
-	y.approved(t, evs[len(evs)-1], seq)
-}
-
-// A crew restart with --for restarts the conversation session for the
-// user: the card holds that session, and the approval requests its
-// restart alone.
-func TestRunAskCrewRestartFor(t *testing.T) {
-	t.Parallel()
-	y := listYard(t)
-	if err := y.write(func(w *wtx) error {
-		res := new(CrewMember)
-		if ok, err := get(w.Tx, bCrew, "yardmaster", res); err != nil || !ok {
-			return err
-		}
-		if res.Config == nil {
-			res.Config = map[string]any{}
-		}
-		// A declared conversation session has no stored row until it is
-		// first used; the terminal command still accepts a restart for it.
-		res.Config[EnvForPrefix+"ada"] = "ada.env"
-		return put(w.Tx, bCrew, "yardmaster", res)
-	}); err != nil {
-		t.Fatal(err)
-	}
-	seq := y.ask(t, listAsk("mckean", "crew restart --for ada yardmaster"), "ada")
-	run := y.asked(t, seq).Ask.Run
-	if want := []string{"crew", "restart", "yardmaster", "--for", "ada"}; !slices.Equal(run.Argv, want) {
-		t.Fatalf("the ask holds %q, want %q", run.Argv, want)
-	}
-	if want := []string{"starts a fresh session of yardmaster for ada once the current one is idle."}; !slices.Equal(run.Does, want) {
-		t.Fatalf("the card says %q, want %q", run.Does, want)
-	}
-	if len(run.Seen["crew yardmaster for ada session"]) != 64 || len(run.Seen["crew yardmaster for ada restart"]) != 64 {
-		t.Fatalf("the ask keeps seen %q, want SHA-256 hashes of the conversation session and the request", run.Seen)
-	}
-	done, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", false, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if done.Result != "restart requested: yardmaster" {
-		t.Fatalf("the approval ran %q", done.Result)
-	}
-	member, err := y.GetCrew(y.ctx, "yardmaster")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if member.Conversations["ada"].RestartRequested != "requested by mckean" {
-		t.Fatalf("the conversation session's restart is %q", member.Conversations["ada"].RestartRequested)
-	}
-	if member.RestartRequested != "" {
-		t.Fatalf("the line session's restart is %q, want none", member.RestartRequested)
-	}
-}
-
-// A restart requested after the ask makes the approval stale: the card
-// holds whether one is requested, and a request since is another's.
-func TestRunAskCrewRestartStaleOnRequest(t *testing.T) {
-	t.Parallel()
-	y := listYard(t)
-	seq := y.ask(t, listAsk("mckean", "crew restart yardmaster"), "ada")
-	if err := y.RequestRestartFor(y.ctx, "yardmaster", "", "requested by mckean", "", "mckean"); err != nil {
-		t.Fatal(err)
-	}
-	y.refusedStale(t, seq, "was written while no restart of yardmaster was requested: one was requested since")
-}
-
-// A session ended or restarted after the ask makes the approval stale:
-// the card holds the session it was written for, not the one that runs
-// now.
-func TestRunAskCrewRestartStaleOnSession(t *testing.T) {
-	t.Parallel()
-	y := listYard(t)
-	seq := y.ask(t, listAsk("mckean", "crew restart yardmaster"), "ada")
-	if err := y.CrewStartedFor(y.ctx, "yardmaster", "", map[string]any{"agent": "herdr-1"}); err != nil {
-		t.Fatal(err)
-	}
-	y.refusedStale(t, seq, "was written for the session yardmaster ran then: it ended or restarted since")
-}
-
-// A crew restart is refused past its row: a crew member the yard has not,
-// an asker who may restart themselves, a conversation session the member
-// has not, a command beside the row's form, and a restart requested
-// already.
-func TestRunAskCrewRestartRefusals(t *testing.T) {
-	t.Parallel()
-	y := listYard(t)
-	for _, c := range []struct{ command, actor, want string }{
-		{"crew restart nobody", "ada", "crew member nobody: not found"},
-		{"crew restart yardmaster", "mckean", "needs no approval: run it yourself"},
-		{"crew restart yardmaster", "yardmaster", "needs no approval: run it yourself"},
-		{"crew restart", "ada", "one crew member, not 0 words"},
-		{"crew restart a b", "ada", "one crew member, not 2 words"},
-		{"crew restart yardmaster --revision abc", "ada", "crew restart with --revision is the operator's to type in a terminal"},
-		{"crew restart yardmaster --for a --for b", "ada", "--for once, not 2 times"},
-		{"crew restart yardmaster --for hal", "ada", "has no conversation session for hal"},
-	} {
-		if _, err := y.AddAsk(y.ctx, y.bead, listAsk("mckean", c.command), c.actor); err == nil || !strings.Contains(err.Error(), c.want) {
-			t.Errorf("--run %q as %s = %v, want %q", c.command, c.actor, err, c.want)
-		}
-	}
-	if err := y.RequestRestartFor(y.ctx, "yardmaster", "", "requested by mckean", "", "mckean"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := y.AddAsk(y.ctx, y.bead, listAsk("mckean", "crew restart yardmaster"), "ada"); err == nil || !strings.Contains(err.Error(), "is requested already, so the command would change nothing") {
-		t.Errorf("asking the restart that stands = %v, want it refused as changing nothing", err)
-	}
-	if notes, err := y.Notes(y.ctx, y.bead); err != nil || len(notes) != 0 {
-		t.Fatalf("the refused asks left %d notes, %v", len(notes), err)
-	}
-}
-
-// A crew restart's check is the command's own leave as the asker: the
-// operator's or the yardmaster's, proposed to the operator by anyone
-// else. The command's daemon leg is not the check's: the daemon never
-// asks.
-func TestRunAskCrewRestartUsesItsStoreCheck(t *testing.T) {
-	t.Parallel()
-	y := listYard(t)
-	c, argv, err := parseRun([]string{"crew restart yardmaster"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if c.check == nil {
-		t.Fatal("crew restart has no asker permission check")
-	}
-	var askerErr, operatorErr, masterErr error
-	if err := y.write(func(w *wtx) error {
-		askerErr = c.check(y.ctx, w, argv, "ada")
-		operatorErr = c.check(y.ctx, w, argv, "mckean")
-		masterErr = c.check(y.ctx, w, argv, "yardmaster")
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if class, ok := IsOperatorOnly(askerErr); !ok || class != Askable {
-		t.Fatalf("crew restart refusal = %v; operator-only class is %v, %v", askerErr, class, ok)
-	}
-	if operatorErr != nil {
-		t.Errorf("operator's crew restart check = %v, want allowed", operatorErr)
-	}
-	if masterErr != nil {
-		t.Errorf("yardmaster's crew restart check = %v, want allowed", masterErr)
 	}
 }
 

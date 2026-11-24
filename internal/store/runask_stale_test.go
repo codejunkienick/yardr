@@ -1204,9 +1204,9 @@ func TestCrewChangeTellsUserAskerOfStaleRunAsk(t *testing.T) {
 }
 
 // A crew write tells only the holds whose own reading of the member it
-// moved: an identity change tells an identity hold and leaves crew set
-// and grant holds standing; the crew set approval's own write then tells
-// the other crew set hold and not the ask it approves.
+// moved: an identity change moves none of the readings a crew set or a
+// grant hold carries and tells neither; the crew set approval's own write
+// then tells the other crew set hold and not the ask it approves.
 func TestCrewWriteTellsOnlyTheHoldsWhoseReadingMoved(t *testing.T) {
 	t.Parallel()
 	y := listYard(t)
@@ -1215,23 +1215,12 @@ func TestCrewWriteTellsOnlyTheHoldsWhoseReadingMoved(t *testing.T) {
 	}
 	setHold := y.ask(t, listAsk("mckean", "crew", "set", "yardmaster", "preset=bypass"), "yardmaster")
 	grantHold := y.ask(t, listAsk("mckean", "source", "grant", "crm", "read", "--crew=yardmaster"), "yardmaster")
-	identityHold := y.ask(t, listAsk("mckean", "crew", "identity", "yardmaster", "--source", "crm", "--id", "u2"), "yardmaster")
 	second := y.ask(t, listAsk("mckean", "crew", "set", "yardmaster", "preset=accept-edits"), "yardmaster")
 	if err := y.SetIdentity(y.ctx, "yardmaster", "crm", Identity{ID: "u9"}, "mckean"); err != nil {
 		t.Fatal(err)
 	}
-	var setTold, grantTold, identityTold, secondTold bool
-	for _, e := range crewTells(t, y) {
-		setTold = setTold || toldSeq(e) == setHold
-		grantTold = grantTold || toldSeq(e) == grantHold
-		identityTold = identityTold || toldSeq(e) == identityHold
-		secondTold = secondTold || toldSeq(e) == second
-		if toldSeq(e) == identityHold && e.Data["seen"] != "crew yardmaster" {
-			t.Errorf("the identity tell names %v, want crew yardmaster", e.Data["seen"])
-		}
-	}
-	if setTold || grantTold || !identityTold || secondTold {
-		t.Fatalf("the identity write told set %v, grant %v, identity %v and second %v, want the identity hold alone", setTold, grantTold, identityTold, secondTold)
+	if got := crewTells(t, y); len(got) != 0 {
+		t.Fatalf("the identity write told the holds: %v, want none", got)
 	}
 	// The standing grant hold still approves, and the standing crew set
 	// hold approves to the member its card shows.
@@ -1244,8 +1233,7 @@ func TestCrewWriteTellsOnlyTheHoldsWhoseReadingMoved(t *testing.T) {
 	// The approval's own member write answers the crew set hold; it must
 	// not also tell the asker that the hold it just approved went stale,
 	// while the other crew set hold is told.
-	var selfTold bool
-	secondTold = false
+	var selfTold, secondTold bool
 	for _, e := range crewTells(t, y) {
 		selfTold = selfTold || toldSeq(e) == setHold
 		secondTold = secondTold || toldSeq(e) == second
@@ -1255,9 +1243,6 @@ func TestCrewWriteTellsOnlyTheHoldsWhoseReadingMoved(t *testing.T) {
 	}
 	if _, err := y.ApproveAsk(y.ctx, y.bead, second, "mckean", true, nil); err == nil || !strings.Contains(err.Error(), "Nothing ran") {
 		t.Fatalf("approving the told crew set hold = %v, want a refusal that ran nothing", err)
-	}
-	if _, err := y.ApproveAsk(y.ctx, y.bead, identityHold, "mckean", false, nil); err == nil || !strings.Contains(err.Error(), "Nothing ran") {
-		t.Fatalf("approving the told identity hold = %v, want a refusal that ran nothing", err)
 	}
 	// Changing model alone tells a crew set hold that sets model and leaves
 	// one setting preset alone standing (the card's four combinations).
@@ -1329,19 +1314,18 @@ func TestCrewAbsentCreateAndDeleteTellAsker(t *testing.T) {
 	if _, err := y.ApproveAsk(y.ctx, y.bead, pending, "mckean", true, nil); err == nil || !strings.Contains(err.Error(), "Nothing ran") {
 		t.Fatalf("approving the told hold = %v, want a refusal that ran nothing", err)
 	}
-	// Removing the member tells both a fresh grant hold and an open identity
-	// hold for a source where the member held no identity yet. Done from a
-	// crew pane with a spoofed actor, the tell records the pane's resolved
-	// actor, matching crew_deleted.
+	// Removing the member tells both a fresh grant hold and an open crew
+	// set hold. Done from a crew pane with a spoofed actor, the tell records
+	// the pane's resolved actor, matching crew_deleted.
 	fresh := y.ask(t, listAsk("mckean", "source", "grant", "crm", "read", "--crew=newhire"), "yardmaster")
-	noID := y.ask(t, listAsk("mckean", "crew", "identity", "newhire", "--source", "crm", "--id", "u1"), "ada")
+	open := y.ask(t, listAsk("mckean", "crew", "set", "newhire", "preset=bypass"), "ada")
 	if err := y.CrewStarted(y.ctx, "yardmaster", map[string]any{"shell_pid": os.Getpid()}); err != nil {
 		t.Fatal(err)
 	}
 	if err := y.DeleteCrew(WithCaller(y.ctx, os.Getpid()), "newhire", "", "mckean"); err != nil {
 		t.Fatal(err)
 	}
-	var freshTold, noIDTold int
+	var freshTold, openTold int
 	for _, e := range crewTells(t, y) {
 		if e.Data["name"] != "newhire" {
 			continue
@@ -1352,18 +1336,18 @@ func TestCrewAbsentCreateAndDeleteTellAsker(t *testing.T) {
 				t.Errorf("the removal tell actor = %q, want resolved pane actor yardmaster", e.Actor)
 			}
 		}
-		if toldSeq(e) == noID {
-			noIDTold++
+		if toldSeq(e) == open {
+			openTold++
 			if e.Actor != "yardmaster" {
-				t.Errorf("the no-identity removal tell actor = %q, want resolved pane actor yardmaster", e.Actor)
+				t.Errorf("the crew set removal tell actor = %q, want resolved pane actor yardmaster", e.Actor)
 			}
 			if Notified(e, "ada") != ReasonAnswered {
-				t.Errorf("ada was not notified of the no-identity removal tell: %v", e.Data)
+				t.Errorf("ada was not notified of the crew set removal tell: %v", e.Data)
 			}
 		}
 	}
-	if freshTold != 1 || noIDTold != 1 {
-		t.Fatalf("the removal told grant %d times and no-identity %d times, want once each", freshTold, noIDTold)
+	if freshTold != 1 || openTold != 1 {
+		t.Fatalf("the removal told grant %d times and crew set %d times, want once each", freshTold, openTold)
 	}
 }
 
@@ -1416,10 +1400,8 @@ func TestPeerRenameTellsCrewGrantHold(t *testing.T) {
 
 // Moving a source's records tells a grant hold of a member whose grants
 // the fold rewrote, from the config whole it read. An identity the fold
-// moves stands under its new source with the fingerprint the hold
-// already carries, so no set crossing tells the identity hold, whose
-// approval the card's own re-reading still refuses; a crew set hold,
-// whose reading names neither, is not told.
+// moves is no part of a crew set hold's reading, so that hold, which
+// names neither, is not told.
 func TestSourceMoveTellsCrewGrantHold(t *testing.T) {
 	t.Parallel()
 	y := listYard(t)
@@ -1428,7 +1410,6 @@ func TestSourceMoveTellsCrewGrantHold(t *testing.T) {
 	}
 	y.crew(t, map[string]any{"kind": "claude", "args": []string{"--careful"}, "open_threads": "crm"})
 	grantHold := y.ask(t, listAsk("mckean", "source", "grant", "crm", "read", "--crew=yardmaster"), "yardmaster")
-	identityHold := y.ask(t, listAsk("mckean", "crew", "identity", "yardmaster", "--source", "crm", "--id", "u2"), "yardmaster")
 	setHold := y.ask(t, listAsk("mckean", "crew", "set", "yardmaster", "preset=bypass"), "yardmaster")
 	if _, err := y.PutSource(y.ctx, "chat.yaml", strings.Replace(runCRM, "name: crm", "name: chat", 1), "mckean"); err != nil {
 		t.Fatal(err)
@@ -1436,20 +1417,16 @@ func TestSourceMoveTellsCrewGrantHold(t *testing.T) {
 	if _, err := y.MoveSourceRecords(y.ctx, "crm", "chat", "mckean"); err != nil {
 		t.Fatal(err)
 	}
-	var grantTold, identityTold, setTold bool
+	var grantTold, setTold bool
 	for _, e := range crewTells(t, y) {
 		grantTold = grantTold || toldSeq(e) == grantHold
-		identityTold = identityTold || toldSeq(e) == identityHold
 		setTold = setTold || toldSeq(e) == setHold
 	}
-	if !grantTold || identityTold || setTold {
-		t.Fatalf("the record move told grant %v, identity %v and set %v, want the grant hold alone", grantTold, identityTold, setTold)
+	if !grantTold || setTold {
+		t.Fatalf("the record move told grant %v and set %v, want the grant hold alone", grantTold, setTold)
 	}
 	if _, err := y.ApproveAsk(y.ctx, y.bead, grantHold, "mckean", false, nil); err == nil || !strings.Contains(err.Error(), "Nothing ran") {
 		t.Fatalf("approving the told grant hold = %v, want a refusal that ran nothing", err)
-	}
-	if _, err := y.ApproveAsk(y.ctx, y.bead, identityHold, "mckean", false, nil); err == nil || !strings.Contains(err.Error(), "Nothing ran") {
-		t.Fatalf("approving the moved identity hold = %v, want a refusal that ran nothing", err)
 	}
 	if _, err := y.ApproveAsk(y.ctx, y.bead, setHold, "mckean", true, nil); err != nil {
 		t.Fatalf("approving the standing crew set hold: %v", err)
@@ -1459,8 +1436,7 @@ func TestSourceMoveTellsCrewGrantHold(t *testing.T) {
 // Session, subscription and group-rename writes never tell a crew hold:
 // a restart writes the session's runtime alone, enabling writes nothing
 // a reading names, subscriptions are read by no crew fingerprint, and a
-// group rename moves only a member's subscriptions. A restart hold is
-// never told either: its session keys are no crew tell's business.
+// group rename moves only a member's subscriptions.
 func TestSessionSubscriptionAndRenameWritesNeverTellCrewHold(t *testing.T) {
 	t.Parallel()
 	y := listYard(t)
@@ -1468,9 +1444,7 @@ func TestSessionSubscriptionAndRenameWritesNeverTellCrewHold(t *testing.T) {
 	addAsk := listAsk("mckean", "crew", "add", "porter", "kind=claude", "preset=bypass")
 	addAsk.Run.Role = "You are the porter.\n"
 	addHold := y.ask(t, addAsk, "yardmaster")
-	restart := y.ask(t, listAsk("mckean", "crew", "restart", "yardmaster"), "ada")
-	restart2 := y.ask(t, listAsk("mckean", "crew", "restart", "yardmaster"), "ada")
-	if _, err := y.ApproveAsk(y.ctx, y.bead, restart, "mckean", false, nil); err != nil {
+	if err := y.RequestRestart(y.ctx, "yardmaster", "a restart", "", "mckean"); err != nil {
 		t.Fatal(err)
 	}
 	if err := y.SetCrewEnabled(y.ctx, "yardmaster", false, "", "mckean"); err != nil {
@@ -1489,14 +1463,14 @@ func TestSessionSubscriptionAndRenameWritesNeverTellCrewHold(t *testing.T) {
 	if got := crewTells(t, y); len(got) != 0 {
 		t.Fatalf("session, subscription or rename writes told the holds: %v", got)
 	}
-	// The crew hold still approves, and its own write tells neither the
-	// restart hold nor the crew add preset hold: those keys stand apart from
-	// a member's definition.
+	// The crew hold still approves, and its own write does not tell the
+	// crew add preset hold: that key stands apart from a member's
+	// definition.
 	if _, err := y.ApproveAsk(y.ctx, y.bead, setHold, "mckean", true, nil); err != nil {
 		t.Fatalf("approving after the session and rename writes: %v", err)
 	}
 	for _, e := range crewTells(t, y) {
-		if toldSeq(e) == restart2 || toldSeq(e) == addHold {
+		if toldSeq(e) == addHold {
 			t.Fatalf("a definition write told a non-member hold: %v", e.Data)
 		}
 	}

@@ -389,9 +389,9 @@ func checkUserIdentityOneToOne(tx *bolt.Tx, name, source string, id Identity) er
 
 // checkCrewIdentityOneToOne is checkUserIdentityOneToOne for a crew
 // member: an id or key in a source hearing by identity names one crew
-// member there. It is checked in setCrewIdentity, the write a crew
-// identity card approval runs, as the user's is in theirs, and holds
-// for a source hearing by identity alone, as theirs does.
+// member there. It is checked in setCrewIdentity, the write the crew
+// identity command makes, as the user's is in theirs, and holds for a
+// source hearing by identity alone, as theirs does.
 func checkCrewIdentityOneToOne(tx *bolt.Tx, name, source string, id Identity) error {
 	if id.zero() {
 		return nil

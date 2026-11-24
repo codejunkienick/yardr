@@ -294,7 +294,7 @@ func (s *Store) openRunAsk(ctx context.Context, id string, seq uint64) (Ask, str
 		}
 		was := *ask.Run
 		again := Ask{Question: ask.Question, To: ask.To, Context: ask.Context, Run: &AskRun{
-			Argv: was.Argv, Carried: was.Carried, Test: was.Test, Role: was.Role, HookTable: was.HookTable, Flow: was.Flow, Chain: was.Chain,
+			Argv: was.Argv, Carried: was.Carried, Test: was.Test, Role: was.Role, HookTable: was.HookTable, Flow: was.Flow,
 		}}
 		return again, n.Author, nil
 	}

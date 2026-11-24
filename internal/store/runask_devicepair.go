@@ -238,9 +238,8 @@ func (w *wtx) devicesOf(user string) ([]Device, error) {
 // address is not the one it named. A device of the name added since is
 // refused by the card itself, which names no free device then. A last
 // use that moved since is neither: the device that approves moves its
-// own by calling, as a device removal's card holds (runask_devicerm.go),
-// so where only that wording differs the approval is held to the card
-// as it stands and carries on.
+// own by calling, so where only that wording differs the approval is held
+// to the card as it stands and carries on.
 func (w *wtx) devicePairStale(seq uint64, was, now AskRun) error {
 	user, _, _ := devicePairOf(was.Argv)
 	if key := "devices " + user; was.Seen[key] != now.Seen[key] {

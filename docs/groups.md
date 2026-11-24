@@ -229,11 +229,11 @@ that has such a name, `webapp-builders`, can be renamed out of it, and not
 back.
 
 Only the operator renames a group, since the name is what a script, a role
-prompt or a person reaches it by. The yardmaster asks on a card, which names
-what follows and is approved or declined as the others are:
-`yardr bead ask <id> -` with the line `R: group rename webapp-builders builders`
-([chat.md](chat.md) lists the cards). The card counts no sessions, since they
-start and end by the minute. It is taken back by the
+prompt or a person reaches it by. The yardmaster has no card of its own for
+it: it files the command as a general card (`yardr bead ask <id> -` with a
+`G:` line for each word of `group rename webapp-builders builders`,
+[chat.md](chat.md#questions-for-you)), which shows the command whole and
+unchecked, and the operator approves or declines it. It is taken back by the
 reverse rename, except for a group whose old name is one imports give a depot's
 groups, which nobody can rename it back to.
 

@@ -37,9 +37,6 @@ func TestParseAskStdin(t *testing.T) {
 		{"flow lines in order", "Q: Set the flow?\nC: the line changes\nR: flow set code\nF: in -> work\nF: work -> done\nF: done terminal\n",
 			askStdin{question: "Set the flow?", context: []string{"the line changes"}, run: "flow set code",
 				flowLines: []string{"in -> work", "work -> done", "done terminal"}}},
-		{"chain lines in order", "Q: Move the route?\nC: the chain changes\nR: route set r1 --group spares\nE: spares@Weekly<90\nE: locals\n",
-			askStdin{question: "Move the route?", context: []string{"the chain changes"}, run: "route set r1 --group spares",
-				chainLines: []string{"spares@Weekly<90", "locals"}}},
 		{"general words in order", "Q: Run it?\nC: why.\nG: bead\nG: create\nG: hello there\n",
 			askStdin{question: "Run it?", context: []string{"why."}, general: []string{"bead", "create", "hello there"}}},
 	} {
@@ -52,30 +49,13 @@ func TestParseAskStdin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := askRunCarried(flowAsk.run, nil, "", false, "", false, nil, nil, "", false, flowAsk.flowLines, nil)
+	run, err := askRunCarried(flowAsk.run, nil, "", false, "", false, nil, nil, "", false, flowAsk.flowLines)
 	if err != nil || run.Flow != "in -> work\nwork -> done\ndone terminal" {
 		t.Errorf("flow lines carried as %+v, %v, want their ordered lines", run, err)
 	}
-	if _, err := askRunCarried(flowAsk.run, nil, "", false, "", false, nil, nil, "code.flow", true, flowAsk.flowLines, nil); err == nil ||
+	if _, err := askRunCarried(flowAsk.run, nil, "", false, "", false, nil, nil, "code.flow", true, flowAsk.flowLines); err == nil ||
 		!strings.Contains(err.Error(), "one of the two") {
 		t.Errorf("a flow file and F: lines together = %v, want one of the two", err)
-	}
-
-	chainAsk, err := parseAskStdin("Q: Move the route?\nC: the chain changes\nR: route set r1 --group spares\nE: spares@Weekly<90\nE: locals\n")
-	if err != nil {
-		t.Fatal(err)
-	}
-	run, err = askRunCarried(chainAsk.run, nil, "", false, "", false, nil, nil, "", false, nil, chainAsk.chainLines)
-	if err != nil || !reflect.DeepEqual(run.Chain, []string{"spares@Weekly<90", "locals"}) {
-		t.Errorf("chain lines carried as %+v, %v, want their ordered groups with conditions", run, err)
-	}
-	if _, err := askRunCarried("route add --stage new --group spares", nil, "", false, "", false, nil, nil, "", false, nil, chainAsk.chainLines); err == nil ||
-		!strings.Contains(err.Error(), "route set") {
-		t.Errorf("chain lines beside route add = %v, want a refusal naming route set", err)
-	}
-	if _, err := askRunCarried(chainAsk.run, nil, "", false, "", false, nil, nil, "", false, nil, []string{"@Weekly<90"}); err == nil ||
-		!strings.Contains(err.Error(), "names no group") {
-		t.Errorf("a chain line with no group = %v, want it refused", err)
 	}
 
 	// A refusal names what is wrong and where; the ones about the form also
@@ -103,7 +83,7 @@ func TestParseAskStdin(t *testing.T) {
 		{"a says line with no command", "Q: Go?\nC: why.\nS: action=opened event=issues -> done\n", "S: with no R: after it", false},
 		{"a makes line with no command", "Q: Go?\nC: why.\nM: action=opened event=issues -> task:new\n", "M: with no R: after it", false},
 		{"a flow line with no command", "Q: Go?\nC: why.\nF: in -> work\n", "F: with no R: after it", false},
-		{"a chain line with no command", "Q: Go?\nC: why.\nE: spares@Weekly<90\n", "E: with no R: after it", false},
+		{"an E: line", "Q: Go?\nC: why.\nE: spares\n", "has the label E:", true},
 		{"a command and its words", "Q: Go?\nR: up\nG: bead\n", "R: and G:", false},
 	} {
 		_, err := parseAskStdin(tc.in)
@@ -203,49 +183,6 @@ func testBeadAskStdin(t *testing.T) {
 		t.Fatalf("the flow set file ask carries %+v, %v", flowAskRun, err)
 	}
 
-	// A route set ask on stdin carries its chain in E: lines, in order.
-	for _, g := range []store.Group{
-		{Name: "builders", Runner: "exec", Config: map[string]any{"cmd": "make build"}},
-		{Name: "spares", Runner: "herdr", Config: map[string]any{"kind": "claude"}},
-		{Name: "locals", Runner: "herdr", Config: map[string]any{"kind": "claude"}},
-	} {
-		if err := st.PutGroup(ctx, g, "mckean"); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := st.PutDepot(ctx, store.Depot{Name: "web"}, "mckean"); err != nil {
-		t.Fatal(err)
-	}
-	web := "web"
-	route, err := st.AddRoute(ctx, store.Route{Stage: "new", Depot: &web, Group: "builders"}, "mckean")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := ask("Q: Move the route?\nC: the chain changes\nR: route set "+route.ID+" --group spares\nE: spares@Weekly<90\nE: locals\n", id, "-"); err != nil {
-		t.Fatalf("a route set ask on stdin: %v", err)
-	}
-	got = notes()
-	chainAskRun, err := askedRun(ctx, st, id, got[len(got)-1].Seq)
-	if err != nil || !reflect.DeepEqual(chainAskRun.Chain, []string{"spares@Weekly<90", "locals"}) {
-		t.Fatalf("the route set ask carries %+v, %v", chainAskRun, err)
-	}
-	if !strings.Contains(strings.Join(chainAskRun.Does, " "), "spares@Weekly<90 else locals") {
-		t.Errorf("the route set card says %q, want the carried chain whole", chainAskRun.Does)
-	}
-	// The same chain via --run-chain-line flags, including a comma-bearing
-	// quota condition (StringArrayVar keeps commas inside one line).
-	if _, err := ask("", id, "Move the route by flags?", "--context", "the chain changes", "--run", "route set "+route.ID+" --group spares", "--run-chain-line", "spares@Weekly<90,5h<95", "--run-chain-line", "locals"); err != nil {
-		t.Fatalf("a route set ask with --run-chain-line: %v", err)
-	}
-	got = notes()
-	chainFlagRun, err := askedRun(ctx, st, id, got[len(got)-1].Seq)
-	if err != nil || !reflect.DeepEqual(chainFlagRun.Chain, []string{"spares@Weekly<90,5h<95", "locals"}) {
-		t.Fatalf("the route set flag ask carries %+v, %v", chainFlagRun, err)
-	}
-	if !strings.Contains(strings.Join(chainFlagRun.Does, " "), "spares@Weekly<90,5h<95 else locals") {
-		t.Errorf("the route set flag card says %q, want the carried chain whole", chainFlagRun.Does)
-	}
-
 	// Flags that name no prose go beside it, as ever.
 	if out, err := ask("Go?\nwhy.\n", id, "-", "--to", "ada"); err != nil || !strings.Contains(out, "to ada") {
 		t.Fatalf("an ask to ada on stdin: %v\n%s", err, out)
@@ -254,7 +191,7 @@ func testBeadAskStdin(t *testing.T) {
 	// With -, no text is a flag's: each is refused, in words, and nothing is
 	// stored.
 	before := len(notes())
-	for _, flag := range [][]string{{"--context", "why."}, {"--option", "Go: it goes"}, {"--why", "because"}, {"--run", "settings set max_sessions 20"}, {"--run-word", "bead"}, {"--run-test", "go test ./..."}, {"--run-says", "action=opened event=issues -> done"}, {"--run-makes", "action=opened event=issues -> task:new"}, {"--run-chain-line", "spares"}} {
+	for _, flag := range [][]string{{"--context", "why."}, {"--option", "Go: it goes"}, {"--why", "because"}, {"--run", "settings set max_sessions 20"}, {"--run-word", "bead"}, {"--run-test", "go test ./..."}, {"--run-says", "action=opened event=issues -> done"}, {"--run-makes", "action=opened event=issues -> task:new"}} {
 		if _, err := ask("Go?\nwhy.\n", append([]string{id, "-"}, flag...)...); err == nil ||
 			!strings.Contains(err.Error(), "with -, put every text on stdin: "+flag[0]+" is given beside it") {
 			t.Errorf("- with %s = %v", flag[0], err)
@@ -318,11 +255,11 @@ func testBeadAskStdin(t *testing.T) {
 // beside the --run family, and is named in the help with G:.
 func TestBeadAskRunWord(t *testing.T) {
 	t.Parallel()
-	got, err := askRunCarried("", []string{"group", "set", "builders", "args=--do it"}, "", false, "", false, nil, nil, "", false, nil, nil)
+	got, err := askRunCarried("", []string{"group", "set", "builders", "args=--do it"}, "", false, "", false, nil, nil, "", false, nil)
 	if err != nil || got.Argv != nil || len(got.General) != 4 || got.General[3] != "args=--do it" {
 		t.Errorf("askRunCarried words = %+v, %v, want them in order as General alone", got, err)
 	}
-	if _, err := askRunCarried("up", []string{"up"}, "", false, "", false, nil, nil, "", false, nil, nil); err == nil ||
+	if _, err := askRunCarried("up", []string{"up"}, "", false, "", false, nil, nil, "", false, nil); err == nil ||
 		!strings.Contains(err.Error(), "one of the two") {
 		t.Errorf("askRunCarried with both forms = %v, want one of the two", err)
 	}
@@ -331,7 +268,7 @@ func TestBeadAskRunWord(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"--run-word", "G: one verbatim word", "general_cards", "--run-chain-line", "E: a chain line of a route set"} {
+	for _, want := range []string{"--run-word", "G: one verbatim word", "general_cards"} {
 		if !strings.Contains(help.Long, want) {
 			t.Errorf("yardr bead ask --help does not name %q", want)
 		}
@@ -343,9 +280,6 @@ func TestBeadAskRunWord(t *testing.T) {
 		{[]string{"ask", "yardr-x", "Run it?", "--context", "c", "--run", "up", "--run-word", "up"}, "one of the two"},
 		{[]string{"ask", "yardr-x", "Run it?", "--context", "c", "--run-word", "up", "--run-test", "go test ./..."}, "go beside --run"},
 		{[]string{"ask", "yardr-x", "Run it?", "--context", "c", "--run-word", "up", "--run-says", "a -> b"}, "go beside --run"},
-		{[]string{"ask", "yardr-x", "Run it?", "--context", "c", "--run-word", "up", "--run-chain-line", "spares"}, "go beside --run"},
-		{[]string{"ask", "yardr-x", "Run it?", "--context", "c", "--run-chain-line", "spares"}, "goes with that command"},
-		{[]string{"ask", "yardr-x", "Run it?", "--context", "c", "--run", "up", "--run-chain-line", "spares"}, "goes with that command"},
 	} {
 		if _, err := run(t, a.beadCmd(), tc.args...); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("bead ask %v = %v, want %q", tc.args, err, tc.want)

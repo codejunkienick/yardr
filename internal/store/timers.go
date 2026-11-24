@@ -341,16 +341,9 @@ func timerRemoveDoes(id string, t *Timer) string {
 	return fmt.Sprintf("remove the timer %s, which %s set for %s", id, t.By, t.To)
 }
 
-// checkTimerRemove refuses removing the timer id as actor when it is
-// neither theirs nor told to them: anyone's own is anyone's to remove,
-// and anyone else's is the operator's.
-func (w *wtx) checkTimerRemove(ctx context.Context, id, actor string) error {
-	_, err := w.timerForRemoval(ctx, id, actor)
-	return err
-}
-
-// timerForRemoval is the permission and existence check RemoveTimer uses;
-// a run ask uses the same check to decide whether the operator must approve.
+// timerForRemoval is the permission and existence check RemoveTimer uses:
+// anyone's own timer, or one told to them, is theirs to remove, and anyone
+// else's is the operator's.
 func (w *wtx) timerForRemoval(ctx context.Context, id, actor string) (*Timer, error) {
 	resolved, err := paneAuthor(w.Tx, callerOf(ctx), actor)
 	if err != nil {
@@ -371,9 +364,9 @@ func (w *wtx) timerForRemoval(ctx context.Context, id, actor string) (*Timer, er
 	return t, nil
 }
 
-// removeTimer is RemoveTimer inside the transaction, so that an approved
-// run ask removes the timer in the write that records its approval: by is
-// then the ask it was approved on, which the event carries.
+// removeTimer is RemoveTimer inside the transaction: by is the ask the
+// removal was approved on, which the event carries, and nil for a removal
+// no ask approved.
 func (w *wtx) removeTimer(ctx context.Context, id, actor string, by *approvedOn) (*Timer, error) {
 	t, err := w.timerForRemoval(ctx, id, actor)
 	if err != nil {

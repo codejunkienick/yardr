@@ -323,7 +323,7 @@ func TestShippedRolePointersResolve(t *testing.T) {
 			"`user add` alone makes an inbox and admits no one",
 			"the operator's approval is the whole invite: no request to the people who make yardr is needed",
 			"or an operator with `--role operator`",
-			"A plain user already under the name goes first (`yardr user rm <name>`, also a run ask)",
+			"A plain user already under the name goes first (`yardr user rm <name>`, on the general card)",
 			"where the yard has no edge, a person comes in by `yardr user add` and a device pairing",
 			"R: user uninvite eve",
 			"A new address gets a set-password mail from the edge; an address with a verified account gets none, so whoever invited the person tells them to sign in",

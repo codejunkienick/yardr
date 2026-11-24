@@ -119,8 +119,6 @@ type AskRun struct {
 	// Flow is the whole flow a flow set row carries beside argv, in the
 	// ask's --run-flow, as the line format writes it. No other row keeps it.
 	Flow string `json:"flow,omitempty"`
-	// Chain is a route set row's whole chain beside argv (runask_route.go).
-	Chain []string `json:"chain,omitempty"`
 	// Role is the prompt text a crew add, group add, group set or crew set
 	// row carries beside argv (the ask's --run-role, or the file prompt=
 	// names), shown on the card in Does. The approval writes it to a file
@@ -331,15 +329,6 @@ var runList = []runCommand{{
 	weigh:       sourceAddWeight,
 	runRun:      runSourceAdd,
 }, {
-	words:       []string{"source", "ignore"},
-	use:         "yardr source ignore <source> --rm <id>",
-	description: "List a source's ignored senders, or stop ignoring one",
-	parse:       parseSourceIgnore,
-	check:       checkSourceIgnore,
-	card:        (*wtx).sourceIgnoreCard,
-	stale:       (*wtx).sourceIgnoreStale,
-	run:         runSourceIgnore,
-}, {
 	words:       []string{"source", "check"},
 	use:         "yardr source check <source> --user <user>",
 	description: "See that a source's credential is set up, make its check call, and ask its limits command",
@@ -413,15 +402,6 @@ var runList = []runCommand{{
 	weigh:       userAddWeight,
 	run:         runUserAdd,
 }, {
-	words:       []string{"user", "rm"},
-	use:         "yardr user rm <name>",
-	description: "Remove a user (the mail stays in the log)",
-	parse:       parseUserRm,
-	check:       checkUserRm,
-	card:        (*wtx).userRmCard,
-	stale:       (*wtx).userRmStale,
-	run:         runUserRm,
-}, {
 	words:       []string{"user", "invite"},
 	use:         "yardr user invite <name> --email <address> [--role operator] [--crew-talk yes|no]",
 	description: "Invite a teammate by email",
@@ -481,15 +461,6 @@ var runList = []runCommand{{
 	link:        crewGrantLink,
 	commas:      true,
 }, {
-	words:       []string{"crew", "identity"},
-	use:         "yardr crew identity <name> --source <source> [--id <id>] [--key <key>]",
-	description: "Who a crew member is in a source (no --source: list)",
-	parse:       parseCrewIdentity,
-	check:       checkCrewIdentity,
-	card:        (*wtx).crewIdentityCard,
-	stale:       (*wtx).crewIdentityStale,
-	run:         runCrewIdentity,
-}, {
 	words:       []string{"user", "identity"},
 	use:         "yardr user identity <user> --source <source> [--id <id>] [--key <key>]",
 	description: "Who a user is in a source (no --source: list)",
@@ -524,29 +495,6 @@ var runList = []runCommand{{
 	run:         runPeerRename,
 	link:        func(argv []string) ([]string, string) { return []string{argv[2]}, "rename its own link" },
 }, {
-	words:       []string{"bead", "update"},
-	use:         "yardr bead update <bead> --originator <user>",
-	description: "Change a bead's fields (use advance to change stage)",
-	parse:       parseOriginator,
-	check:       checkOriginator,
-	card:        (*wtx).originatorCard,
-	stale:       (*wtx).originatorStale,
-	run: func(ctx context.Context, w *wtx, argv []string, actor string, by *approvedOn) (string, error) {
-		if err := w.setOriginator(ctx, argv[2], argv[4], Expect{}, actor, by); err != nil {
-			return "", err
-		}
-		return "originator: " + argv[4], nil
-	},
-}, {
-	words:       []string{"timer", "rm"},
-	use:         "yardr timer rm <id>",
-	description: "Remove a timer: one you set or that tells you, or as the operator any",
-	parse:       parseTimerRm,
-	check:       checkTimerRm,
-	card:        (*wtx).timerRmCard,
-	stale:       (*wtx).timerRmStale,
-	run:         runTimerRm,
-}, {
 	words:       []string{"up"},
 	use:         "yardr up",
 	description: "Start everything the yard needs that is not running",
@@ -555,15 +503,6 @@ var runList = []runCommand{{
 	card:        (*wtx).upCard,
 	stale:       (*wtx).upStale,
 	run:         runUp,
-}, {
-	words:       []string{"crew", "restart"},
-	use:         "yardr crew restart <name> [--for <user>]",
-	description: "Start a fresh session once the current one is idle",
-	parse:       parseCrewRestart,
-	check:       checkCrewRestart,
-	card:        (*wtx).crewRestartCard,
-	stale:       (*wtx).crewRestartStale,
-	run:         runCrewRestart,
 }, {
 	words:       []string{"depot", "test"},
 	use:         "yardr depot test <depot>",
@@ -574,15 +513,6 @@ var runList = []runCommand{{
 	stale:       (*wtx).depotTestStale,
 	weigh:       depotTestWeight,
 	runRun:      runDepotTest,
-}, {
-	words:       []string{"depot", "base"},
-	use:         "yardr depot base <depot> <base>",
-	description: "Change a depot's base",
-	parse:       parseDepotBase,
-	check:       checkDepotBase,
-	card:        (*wtx).depotBaseCard,
-	stale:       (*wtx).depotBaseStale,
-	run:         runDepotBase,
 }}
 
 // askedRun checks the command a run ask for the user to proposes, written
@@ -641,7 +571,7 @@ func (w *wtx) askedRun(ctx context.Context, run AskRun, to, actor string) (*AskR
 	// The command in the yard's own form, with what the writer carried
 	// beside it: the carried bytes are the row's to keep or throw away,
 	// as Does and Seen are.
-	sent := AskRun{Argv: argv, Carried: run.Carried, Test: run.Test, Role: run.Role, HookTable: run.HookTable, Flow: run.Flow, Chain: run.Chain}
+	sent := AskRun{Argv: argv, Carried: run.Carried, Test: run.Test, Role: run.Role, HookTable: run.HookTable, Flow: run.Flow}
 	check := c.check
 	if c.checkRun != nil {
 		check = func(ctx context.Context, w *wtx, _ []string, actor string) error {

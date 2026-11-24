@@ -394,15 +394,14 @@ func granteeCrewFingerprint(r *CrewMember) string {
 // whose "crew <name>" Seen moved between before and after, the member as
 // the write found it and as it leaves it (nil for none: a member added,
 // removed or renamed away). The key is written by the crew set card's
-// four combinations, by the grant and setup cards' whole reading, and by
-// the identity card's reading of one source, so the tell carries them
-// all, the identity readings one per source either side holds, and tells
-// exactly the holds whose own reading of the member it moved. A write
-// that moves only what no reading names — a session's runtime, its
-// subscriptions, the prompt file a card holds by its digest — moves no
-// fingerprint here and costs no scan.
+// four combinations and by the grant and setup cards' whole reading, so
+// the tell carries them all and tells exactly the holds whose own reading
+// of the member it moved. A write that moves only what no reading names
+// — a session's runtime, its subscriptions, an identity, the prompt file
+// a card holds by its digest — moves no fingerprint here and costs no
+// scan.
 func (w *wtx) tellCrewStale(name string, before, after *CrewMember, actor string) error {
-	watched := []tellKey[CrewMember]{{
+	return w.tellXStale("crew", name, before, after, actor, []tellKey[CrewMember]{{
 		key: "crew " + name,
 		fns: []func(*CrewMember) string{
 			func(r *CrewMember) string { return crewSetSeen(r, false, false) },
@@ -411,30 +410,7 @@ func (w *wtx) tellCrewStale(name string, before, after *CrewMember, actor string
 			func(r *CrewMember) string { return crewSetSeen(r, true, true) },
 			func(r *CrewMember) string { return granteeCrewFingerprint(r) },
 		},
-	}}
-	sources := map[string]bool{}
-	for _, side := range []*CrewMember{before, after} {
-		if side == nil {
-			continue
-		}
-		for source := range side.Identities {
-			sources[source] = true
-		}
-	}
-	for _, source := range slices.Sorted(maps.Keys(sources)) {
-		watched[0].fns = append(watched[0].fns, func(r *CrewMember) string {
-			cur := r.Identities[source]
-			return seen(cur.ID, cur.Key)
-		})
-	}
-	if after == nil {
-		// Removing a member stales an open identity hold even for a source
-		// where the member held no identity yet (seen("", "")).
-		watched[0].fns = append(watched[0].fns, func(*CrewMember) string {
-			return seen("", "")
-		})
-	}
-	return w.tellXStale("crew", name, before, after, actor, watched)
+	}})
 }
 
 // cloneUser is a copy of the user u that shares nothing a user write

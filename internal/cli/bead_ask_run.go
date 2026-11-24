@@ -1,8 +1,7 @@
 // How a bead ask carries a --run command's bytes beside argv: whether the
 // command is a depot test ask, whose command --run-test carries, the role
 // file a crew add ask carries, the prompt file a group add, group set or
-// crew set ask carries, the declaration file a source add ask carries and
-// the chain lines a route set ask carries.
+// crew set ask carries, and the declaration file a source add ask carries.
 package cli
 
 import (
@@ -28,14 +27,13 @@ import (
 // command carries beside it, each read once here so the store holds the
 // bytes the card shows. test and role are the values of --run-test and
 // --run-role, and testSet and roleSet say whether they were given; says
-// and makes are the values of --run-says and --run-makes, and chainLines
-// the values of --run-chain-line. Words given
+// and makes are the values of --run-says and --run-makes. Words given
 // (the --run-word values, in order) make a general run ask instead: the
 // verbatim words whole, with nothing read beside them, and the two
 // forms together are refused. A pack apply of a relative directory is
 // sent absolute, against the directory the ask is typed in, since a
 // relative path means nothing to the yard's server.
-func askRunCarried(command string, words []string, test string, testSet bool, role string, roleSet bool, says, makes []string, flow string, flowSet bool, flowLines, chainLines []string) (*store.AskRun, error) {
+func askRunCarried(command string, words []string, test string, testSet bool, role string, roleSet bool, says, makes []string, flow string, flowSet bool, flowLines []string) (*store.AskRun, error) {
 	if len(words) > 0 {
 		if command != "" {
 			return nil, fmt.Errorf("--run proposes a command of the list and --run-word gives a general card's words: one of the two")
@@ -107,49 +105,7 @@ func askRunCarried(command string, words []string, test string, testSet bool, ro
 			return nil, err
 		}
 	}
-	// Route set carries its chain beside the command, in the
-	// --run-chain-line lines: a condition needs < and a quote, none of
-	// which a --run word holds, and further groups ride there only.
-	if len(chainLines) > 0 && !routeSetCommand(command) {
-		return nil, fmt.Errorf("a chain line (E:, --run-chain-line) goes beside the run ask route set <id> --group <group> and no other command")
-	}
-	if routeSetCommand(command) {
-		if run.Chain, err = chainCarried(chainLines); err != nil {
-			return nil, err
-		}
-	}
 	return run, nil
-}
-
-// routeSetCommand reports whether command is the run ask route set
-// <id> ...: those words, with or without the leading yardr. The store
-// parses it; this only says the ask may carry chain lines beside it.
-func routeSetCommand(command string) bool {
-	words := strings.Fields(command)
-	if len(words) > 0 && words[0] == "yardr" {
-		words = words[1:]
-	}
-	return len(words) >= 2 && words[0] == "route" && words[1] == "set"
-}
-
-// chainCarried reads what a run ask of route set ... carries: the
-// --run-chain-line lines, each in the order given and each shape-read
-// as route add spells a group, so the store holds the chain the card
-// shows. It answers nil where the ask carries no line, so a route set
-// ask without lines behaves as it always did.
-func chainCarried(lines []string) ([]string, error) {
-	if len(lines) == 0 {
-		return nil, nil
-	}
-	out := make([]string, len(lines))
-	for i, line := range lines {
-		g := store.ParseRouteGroup(line)
-		if g.Name == "" {
-			return nil, fmt.Errorf("--run-chain-line %q names no group: want <group>[@<condition>]", line)
-		}
-		out[i] = g.String()
-	}
-	return out, nil
 }
 
 // flowSetCommand reports whether command is the run ask flow set

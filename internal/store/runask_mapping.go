@@ -1,10 +1,8 @@
-// The two rows of the run-ask list the mapping cards run (runList): a
-// user's identity in a source, as its crew sibling is, and removing a
-// sender from a source's ignore list. Each has what a row has: how its
-// words are read into one stored form, the command's own check as the
-// asker, the card the yard writes from its records, why an approval of
-// an older card is refused, and the store function that makes the
-// change.
+// The user identity row of the run-ask list (runList): a user's
+// identity in a source. It has what a row has: how its words are read
+// into one stored form, the command's own check as the asker, the card
+// the yard writes from its records, why an approval of an older card
+// is refused, and the store function that makes the change.
 package store
 
 import (
@@ -183,114 +181,4 @@ func runUserIdentity(ctx context.Context, w *wtx, argv []string, actor string, b
 		out += fmt.Sprintf("\n%s is no longer ignored in %s", held, source)
 	}
 	return out, nil
-}
-
-// sourceIgnoreUse is how a refusal names the source ignore a run ask takes.
-const sourceIgnoreUse = "yardr source ignore <source> --rm <id>"
-
-// parseSourceIgnore reads the words of source ignore <source> --rm
-// <id>: the source and the ignored id it removes, each once. Listing
-// what is ignored needs no approval, so a command without --rm is no
-// run ask.
-func parseSourceIgnore(rest []string) ([]string, error) {
-	args, values, err := runWords(sourceIgnoreUse, "source ignore", "the operator's", rest, map[string]bool{"--rm": true})
-	if err != nil {
-		return nil, err
-	}
-	if len(args) != 1 {
-		if len(args) == 0 {
-			return nil, fmt.Errorf("--run takes %s: it names no source", sourceIgnoreUse)
-		}
-		return nil, fmt.Errorf("--run takes %s: one source, not %s", sourceIgnoreUse, strings.Join(args, " and "))
-	}
-	if len(values["--rm"]) != 1 {
-		if len(values["--rm"]) == 0 {
-			return nil, fmt.Errorf("--run takes %s: it names nothing to remove: --rm <id>", sourceIgnoreUse)
-		}
-		return nil, fmt.Errorf("--run takes %s: --rm once, with the ignored id it removes", sourceIgnoreUse)
-	}
-	return []string{args[0], "--rm", values["--rm"][0]}, nil
-}
-
-// sourceIgnoreOf is the source and the ignored id of a parsed source ignore.
-func sourceIgnoreOf(argv []string) (source, sender string) { return argv[2], argv[4] }
-
-// checkSourceIgnore is un-ignoring a sender's own check as the asker.
-func checkSourceIgnore(ctx context.Context, w *wtx, argv []string, actor string) error {
-	source, _ := sourceIgnoreOf(argv)
-	return w.may(ctx, actor, ActUnignoreSender, Object{Kind: KindSource, Name: source, Ask: Askable})
-}
-
-// sourceIgnoreCard is the card of source ignore <source> --rm <id>:
-// the entry it removes, that the sender's next message follows the
-// hook's word again, and what stays ignored. The approval is held to
-// the source as it was and to the list whole (Seen). Asking refuses a
-// source the yard does not declare, one with no identity hearing, and
-// an id the list does not name.
-func (w *wtx) sourceIgnoreCard(argv []string, asking bool) (AskRun, error) {
-	name, sender := sourceIgnoreOf(argv)
-	src, d, err := sourceIn(w.Tx, name)
-	if err != nil {
-		return AskRun{}, err
-	}
-	if !d.HearsByIdentity() {
-		return AskRun{}, fmt.Errorf("source %s: --rm %s for a source with no identity hearing: source %s hears no sender by identity, so nothing of it is ignored", name, sender, name)
-	}
-	if asking && !slices.Contains(src.Ignored, sender) {
-		return AskRun{}, fmt.Errorf("%s is not ignored in %s: the command would change nothing", sender, name)
-	}
-	ignored := slices.Sorted(slices.Values(src.Ignored))
-	does := []string{fmt.Sprintf("removes %s from the senders ignored in %s, so their next message follows the hook's word again: under unknown a fresh mapping card is offered, under allow it is heard as an outsider.", sender, name)}
-	var rest []string
-	for _, id := range ignored {
-		if id != sender {
-			rest = append(rest, id)
-		}
-	}
-	if len(rest) == 1 {
-		does = append(does, fmt.Sprintf("%s stays ignored in %s.", rest[0], name))
-	} else if len(rest) > 1 {
-		does = append(does, fmt.Sprintf("%s stay ignored in %s.", strings.Join(rest, ", "), name))
-	}
-	fingerprint, err := w.sourceSeen(src)
-	if err != nil {
-		return AskRun{}, err
-	}
-	return AskRun{
-		Argv:   argv,
-		Does:   does,
-		Back:   "their next message offers a fresh mapping card, whose nobody pick ignores them again",
-		BackBy: "nobody",
-		Seen:   map[string]string{"source " + name: fingerprint, "source " + name + " ignored": seen(ignored)},
-	}, nil
-}
-
-// sourceIgnoreStale says why the ask seq for source ignore is approved
-// no more: the source is another under its name, the entry is gone, or
-// what stays ignored is not what the card says.
-func (w *wtx) sourceIgnoreStale(seq uint64, was, now AskRun) error {
-	name, sender := sourceIgnoreOf(was.Argv)
-	if err := w.staleSource(seq, name, was, now); err != nil {
-		return err
-	}
-	if key := "source " + name + " ignored"; was.Seen[key] != now.Seen[key] {
-		src := new(Source)
-		if ok, err := get(w.Tx, bSources, name, src); err == nil && ok && !slices.Contains(src.Ignored, sender) {
-			e := lastEvent(w.Tx, "sender_unignored", func(e Event) bool {
-				return e.Data["source"] == name && e.Data["sender"] == sender
-			})
-			return fmt.Errorf("ask %d was written when %s was ignored in %s, and it is heard again already: nothing is left to change%s. %s", seq, sender, name, since(e), nothingRan)
-		}
-	}
-	return staleCard(seq, was, now)
-}
-
-// runSourceIgnore removes the entry as actor through unignoreSender,
-// and answers what the command prints at a terminal.
-func runSourceIgnore(ctx context.Context, w *wtx, argv []string, actor string, by *approvedOn) (string, error) {
-	name, sender := sourceIgnoreOf(argv)
-	if err := w.unignoreSender(ctx, name, sender, actor, by); err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("source %s: %s is no longer ignored", name, sender), nil
 }

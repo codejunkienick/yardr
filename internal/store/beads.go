@@ -1300,9 +1300,9 @@ type BeadPatch struct {
 }
 
 // setOriginator is the originator part of UpdateBead inside the
-// transaction: the bead id becomes for the user to. It is also what an
-// approved run ask runs, without an Expect and with by, the ask it was
-// approved on, which the event carries.
+// transaction: the bead id becomes for the user to. by is the ask the change
+// was approved on, which the event carries, and nil for a change typed at a
+// terminal.
 func (w *wtx) setOriginator(ctx context.Context, id, to string, exp Expect, actor string, by *approvedOn) error {
 	_, err := w.changeBead(id, actor, func(w *wtx, b *beadRow) (string, map[string]any, error) {
 		if err := w.check(ctx, exp, b); err != nil {

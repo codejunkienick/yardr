@@ -337,10 +337,9 @@ func TestWebApprovesARoutineRunCard(t *testing.T) {
 	t.Parallel()
 	y := newApproveYard(t, true)
 	ctx := context.Background()
-	must(t, func() error { _, err := y.st.AddUser(ctx, "gone", "jo"); return err }())
 	must(t, y.st.SetSetting(ctx, store.NameSetting, "depot", "jo"))
-	b := y.bead("take back a user")
-	seq := y.askRun(b.ID, "jo", "user", "rm", "gone")
+	b := y.bead("raise the session limit")
+	seq := y.askRun(b.ID, "jo", "settings", "set", "max_sessions", "20")
 	tok := y.token("jo@example.net")
 
 	page := jwtGet(t, y.ts, "/beads/"+b.ID, web.DefaultJWTHeader, tok)
@@ -358,7 +357,7 @@ func TestWebApprovesARoutineRunCard(t *testing.T) {
 		`<p class="ask-line">` + b.ID + ` · ask ` + strconv.FormatUint(seq, 10) + `</p>`,
 		`<p class="ask-asker">asked by yardmaster</p>`,
 		`<p>in depot, when you approve, the yard runs this as jo, and nothing else:</p>`,
-		`<pre class="text file">yardr user rm gone</pre>`,
+		`<pre class="text file">yardr settings set max_sessions 20</pre>`,
 		`<a class="ask-about" href="/talk?with=yardmaster">Ask about this</a>`,
 	} {
 		if !strings.Contains(page.body, want) {
@@ -374,8 +373,8 @@ func TestWebApprovesARoutineRunCard(t *testing.T) {
 	if r.status != http.StatusSeeOther || r.header.Get("Location") != "/beads/"+b.ID {
 		t.Fatalf("POST the approval: %d %q: %s", r.status, r.header.Get("Location"), r.body)
 	}
-	if _, err := y.st.GetUser(ctx, "gone"); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("the approval left the user: %v", err)
+	if got, err := y.st.Settings(ctx); err != nil || got["max_sessions"] != "20" {
+		t.Fatalf("the approval left max_sessions at %q: %v", got["max_sessions"], err)
 	}
 	if got := y.askedState(b.ID, seq, "jo"); got != "answered" {
 		t.Fatalf("the ask is %s after the approval, want it answered", got)
