@@ -323,14 +323,20 @@ nothing
 will land, every time"), and its landing gate differs from any plain
 run (`whole()` in `.yardr/test`: the selection plus the six black-box
 suites with `-race`, vet for linux too, the socket leg beside), so no
-plain test line ever satisfies it. The test line carries the run's wall time
-and race-lock wait, written by `.yardr/test` itself so every note holds
-them: `test: sh .yardr/test @ <sha>: pass, <n> packages ok, 0 failed, 112 s,
-waited 40 s`. The fields are the result, the packages passed and failed, the
-run's wall seconds, and the seconds it queued on the machine-wide race lock:
-`waited 0 s` on most builder and review lines -- a leaf selection takes no
-lock -- and a wait on a landing's, or on a whole-suite plain run's that
-queued behind one.
+plain test line ever satisfies it. The test line carries the run's wall time,
+race-lock wait and what it compared with, written by `.yardr/test` itself so
+every note holds them: `test: sh .yardr/test @ <sha>: pass, <n> packages ok,
+0 failed, 112 s, waited 40 s (base <base>, 7 files changed)`. The fields
+are the result, the packages passed and failed, the run's wall seconds, the
+seconds it queued on the machine-wide race lock (`waited 0 s` on most builder
+and review lines -- a leaf selection takes no lock -- and a wait on a
+landing's, or on a whole-suite plain run's that queued behind one), and what
+it compared with: the base it selected from and how many files had changed
+since. A reviewer holds those two against the branch's diff
+(`git diff --no-renames --name-only <base> | wc -l`), so a run that selected
+from less than the branch changed shows in its line, and not only in a
+landing that finds what the run missed. A landing with no comparable base
+runs the whole suite and says `(no comparable base)` there.
 
 R5. The landing runs the incremental selection -- today's package pick --
 plus always the six black-box suites (contrib/assembly, contrib/peer,

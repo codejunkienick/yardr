@@ -33,10 +33,12 @@ test reaches by building the binary instead of importing it, or store,
 dispatch or bdp behaviour over the socket. The assembly runs `.yardr/test`
 as it is on main, so an edit to it on the branch is tested by your run
 alone. The run ends with its test line, printed by the script itself: `test: sh
-.yardr/test @ <commit>: pass, <n> packages ok, 0 failed, 112 s, waited 40
-s` -- the result, the packages `ok` and `FAIL`, the wall seconds, and the
-seconds queued on the race lock (`waited 0 s` for your run, unless its step covered the whole suite).
-A note carries it whole.
+.yardr/test @ <commit>: pass, <n> packages ok, 0 failed, 112 s, waited 40 s
+(base <base>, 7 files changed)` -- the result, the packages `ok` and `FAIL`,
+the wall seconds, the seconds queued on the race lock (`waited 0 s` for your
+run, unless its step covered the whole suite), and the base the run selected
+from with the number of files changed since it, which a reviewer holds against
+the diff. A note carries it whole.
 
 Before it selects anything the run reads the free space of the volumes it
 writes to (GOCACHE's, GOTMPDIR's, TMPDIR's), and under its floor on any of

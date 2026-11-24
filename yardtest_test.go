@@ -1347,7 +1347,8 @@ func TestYardTestSelects(t *testing.T) {
 	// start from this test's sh -c. The lock's own tests run those legs
 	// from a file and pin the queueing. The go it runs is the real
 	// one for the list of packages, with this test's home, and writes down
-	// every other call.
+	// every other call. Each run's test line ends with the base it selected
+	// from and the number of files the row changed.
 	for _, c := range []struct {
 		name    string
 		env     []string // beyond the plain run's: a landing's mark, or what the caller started the run with
@@ -1384,6 +1385,13 @@ func TestYardTestSelects(t *testing.T) {
 			pre + "what changed" + sincePH + plainWhy,
 			[]string{"conformance vet ./...", "conformance build ./...", "conformance " + hostScanCall, "conformance " + staticCall, "conformance test ./..."},
 			[]string{"gofmt -l .", "shellcheck", "go vet ./...", "go build ./...", "sleep budgets", "file size budgets", "tell sites", "redaction marker scan", hostScanStep, staticStep, "go test ./..."}},
+		// Nothing changed: no package to test, and an empty list to count. The
+		// count's grep -c . exits 1 for it, which must not end the run under
+		// set -e before the test line says 0 files (yardr-js99).
+		{"a plain run of nothing changed tests nothing and counts no file", nil, nil,
+			pre + "what changed" + sincePH,
+			[]string{"vet ./...", "build ./...", hostScanCall, staticCall},
+			[]string{"go list -test ./...", "gofmt -l .", "shellcheck", "go vet ./...", "go build ./...", "sleep budgets", "file size budgets", "tell sites", "redaction marker scan", hostScanStep, staticStep}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -1409,8 +1417,11 @@ func TestYardTestSelects(t *testing.T) {
 			if _, err := os.Stat(filepath.Join(home, ".yardr")); !errors.Is(err, os.ErrNotExist) {
 				t.Errorf("the run made the yard's directory in its home, so it took the race lock: %v", err)
 			}
-			if !regexp.MustCompile(`(?m)^test: sh \.yardr/test @ [0-9a-f]+: pass, [0-9]+ packages ok, 0 failed, [0-9]+ s, waited 0 s$`).MatchString(rest) {
-				t.Errorf("the output has no test line that waited 0 s:\n%s", rest)
+			// The line closes with what the run compared with: the fixture's
+			// base, and the files this row changed, each counted once.
+			wantCompared := fmt.Sprintf(" (base %s, %d files changed)", fx.short, len(c.changed))
+			if !regexp.MustCompile(`(?m)^test: sh \.yardr/test @ [0-9a-f]+: pass, [0-9]+ packages ok, 0 failed, [0-9]+ s, waited 0 s` + regexp.QuoteMeta(wantCompared) + `$`).MatchString(rest) {
+				t.Errorf("the output has no test line that waited 0 s and ends with %q:\n%s", wantCompared, rest)
 			}
 		})
 	}
@@ -1421,7 +1432,8 @@ func TestYardTestSelects(t *testing.T) {
 	// reach starts no leg, and one over internal/rpc or internal/web
 	// starts it. A landing over an unknown file is still the whole
 	// suite. The go it runs is the real one for the list of packages
-	// and writes down every other call.
+	// and writes down every other call. Each landing's test line ends with the
+	// base it selected from and the one file the row changed.
 	const selCLI = "m.test/m/contrib/assembly m.test/m/contrib/deploy m.test/m/contrib/isolated-yard m.test/m/contrib/peer m.test/m/contrib/release m.test/m/contrib/server-yard m.test/m/internal/cli m.test/m/internal/rpc"
 	const selRPC = "m.test/m/contrib/assembly m.test/m/contrib/deploy m.test/m/contrib/isolated-yard m.test/m/contrib/peer m.test/m/contrib/release m.test/m/contrib/server-yard m.test/m/internal/rpc m.test/m/internal/store"
 	const selWEB = "m.test/m/contrib/assembly m.test/m/contrib/deploy m.test/m/contrib/isolated-yard m.test/m/contrib/peer m.test/m/contrib/release m.test/m/contrib/server-yard m.test/m/internal/rpc m.test/m/internal/web"
@@ -1481,6 +1493,12 @@ func TestYardTestSelects(t *testing.T) {
 			wantGoCalls(t, fake, c.calls)
 			wantSteps(t, rest, c.steps)
 			wantNear(t, rest)
+			// A landing's test line ends with what it compared with as a plain
+			// run's does: the fixture's base, and the one file the row changed.
+			wantCompared := fmt.Sprintf(" (base %s, 1 files changed)", fx.short)
+			if !regexp.MustCompile(`(?m)^test: sh \.yardr/test @ [0-9a-f]+: pass, [0-9]+ packages ok, 0 failed, [0-9]+ s, waited [0-9]+ s` + regexp.QuoteMeta(wantCompared) + `$`).MatchString(rest) {
+				t.Errorf("the output has no test line ending with %q:\n%s", wantCompared, rest)
+			}
 		})
 	}
 	t.Run("the near-ceiling warning is shown when gofmt fails first", func(t *testing.T) {
@@ -3635,14 +3653,16 @@ printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n%s\n' "$line"
 
 // The run ends with its own test line (docs/testing.md R4), the line a note
 // carries whole: the result, the packages passed and failed, the wall
-// seconds, and the seconds queued on the race lock, at the short sha. A
-// package that passed on rerun counts as passed; a plan and a run that
-// could not start print none. Every row runs the gate in its own fixture,
-// so the rows run in parallel.
+// seconds, the seconds queued on the race lock, and what it compared with, at
+// the short sha: the base it selected from and the number of files changed
+// since, or that it had no comparable base, which is a landing's whole suite,
+// and a red run says it too. A package that passed on rerun counts as passed;
+// a plan and a run that could not start print none. Every row runs the gate
+// in its own fixture, so the rows run in parallel.
 func TestYardTestPrintsItsTestLine(t *testing.T) {
 	t.Parallel()
 	const flaky = "test: flaky: TestX (m.test/m/a) passed on rerun"
-	line := regexp.MustCompile(`^test: sh \.yardr/test @ ([0-9a-f]+): (pass|fail), ([0-9]+) packages ok, ([0-9]+) failed, ([0-9]+) s, waited ([0-9]+) s$`)
+	line := regexp.MustCompile(`^test: sh \.yardr/test @ ([0-9a-f]+): (pass|fail), ([0-9]+) packages ok, ([0-9]+) failed, ([0-9]+) s, waited ([0-9]+) s( \(.*\))$`)
 	// A go whose test step reports a wait the way the race lock would, then
 	// fails its first few runs with one package's FAIL lines and passes with
 	// two packages' ok lines. With FAKE_NUL it prints a line holding a NUL byte
@@ -3684,6 +3704,11 @@ elif [ "$1" = test ]; then
 fi
 `
 	m := newModGate(t)
+	// What a box's run compared with: its commit as the base, and go.mod, the
+	// one file box changes, as the one file changed. A landing that has no
+	// base compared with none, and says so where the base and the count stand.
+	based := " (base " + m.short + ", 1 files changed)"
+	const nobase = " (no comparable base)"
 	for _, c := range []struct {
 		name  string
 		fails string // how often the test step fails: 0 (green), 1 (flaky), 2 (red)
@@ -3697,19 +3722,20 @@ fi
 		env   []string // variables of the script's environment beyond the base
 		nosum bool     // want no test line at all
 		bin   string   // the go to run against: testGo when empty
+		cmp   string   // want what the run compared with, the end of the line
 	}{
-		{"green", "0", "", 0, "pass", "2", "0", "0", false, nil, false, ""},
-		{"a wait is summed", "0", "3", 0, "pass", "2", "0", "3", false, nil, false, ""},
+		{"green", "0", "", 0, "pass", "2", "0", "0", false, nil, false, "", based},
+		{"a wait is summed", "0", "3", 0, "pass", "2", "0", "3", false, nil, false, "", based},
 		// A log that holds a NUL byte is counted as text (yardr-2147): a grep
 		// that took it for binary summed no wait.
 		{"a wait and the passed packages are counted from a log holding a NUL byte", "0", "3", 0, "pass", "2", "0", "3", false,
-			[]string{"FAKE_NUL=1"}, false, ""},
-		{"a pass on rerun counts as passed", "1", "", 0, "pass", "2", "0", "0", true, nil, false, ""},
-		{"red", "2", "", 1, "fail", "0", "1", "0", false, nil, false, ""},
-		{"a plan prints none", "0", "", 0, "", "", "", "", false, []string{"YARDR_TEST_PLAN=1"}, true, ""},
-		{"exit 2 prints none", "0", "", 2, "", "", "", "", false, []string{"YARDR_BASE=nowhere"}, true, ""},
+			[]string{"FAKE_NUL=1"}, false, "", based},
+		{"a pass on rerun counts as passed", "1", "", 0, "pass", "2", "0", "0", true, nil, false, "", based},
+		{"red", "2", "", 1, "fail", "0", "1", "0", false, nil, false, "", based},
+		{"a plan prints none", "0", "", 0, "", "", "", "", false, []string{"YARDR_TEST_PLAN=1"}, true, "", ""},
+		{"exit 2 prints none", "0", "", 2, "", "", "", "", false, []string{"YARDR_BASE=nowhere"}, true, "", ""},
 		{"a socket step that passes on retry counts by its final result", "0", "", 0, "pass", "4", "0", "0", true,
-			[]string{"YARDR_LANDING=1", "YARDR_BASE=nowhere"}, false, socketGo},
+			[]string{"YARDR_LANDING=1", "YARDR_BASE=nowhere"}, false, socketGo, nobase},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -3734,9 +3760,9 @@ fi
 			if got == nil {
 				t.Fatalf("last line %q, want the test line", lines[len(lines)-1])
 			}
-			if got[1] != b.short || got[2] != c.res || got[3] != c.pok || got[4] != c.pfail || got[6] != c.pwait {
-				t.Errorf("test line %q, want @ %s: %s, %s packages ok, %s failed, waited %s s",
-					lines[len(lines)-1], b.short, c.res, c.pok, c.pfail, c.pwait)
+			if got[1] != b.short || got[2] != c.res || got[3] != c.pok || got[4] != c.pfail || got[6] != c.pwait || got[7] != c.cmp {
+				t.Errorf("test line %q, want @ %s: %s, %s packages ok, %s failed, waited %s s%s",
+					lines[len(lines)-1], b.short, c.res, c.pok, c.pfail, c.pwait, c.cmp)
 			}
 			if strings.Contains(out, flaky) != c.flaky {
 				t.Errorf("the output has the flaky line: %v, want %v", !c.flaky, c.flaky)
@@ -5140,6 +5166,13 @@ var raceTicketName = regexp.MustCompile(`^[01]-\d+-\d+$`)
 // a second.
 var raceWaitStarted = regexp.MustCompile(`(?m)^test: race lock wait started at \d+$`)
 
+// comparedEnd closes a run's test line, whatever the run: the base it selected
+// from and how many files had changed since, or that it had no comparable base,
+// as a landing's whole suite has none. The rows whose fixture knows both say
+// them exactly (TestYardTestPrintsItsTestLine and the plain runs of
+// TestYardTestSelects); a caller that only needs the line found takes this.
+const comparedEnd = ` \((?:base [0-9a-f]+, [0-9]+ files changed|no comparable base)\)`
+
 // wantQueued fails the case unless the output of a run that queued on the race
 // lock says so, as who did: the marker of its wait's start, one line of the
 // seconds it waited, and a test line whose waited seconds are positive.
@@ -5151,7 +5184,7 @@ func wantQueued(t *testing.T, who, out string) {
 	if waits := regexp.MustCompile(`(?m)^test: waited \d+ s for the race lock$`).FindAllString(out, -1); len(waits) != 1 {
 		t.Errorf("%s has %d wait lines, want 1:\n%s", who, len(waits), out)
 	}
-	if !regexp.MustCompile(`(?m)^test: sh \.yardr/test @ [0-9a-f]+: pass, [0-9]+ packages ok, 0 failed, [0-9]+ s, waited [1-9][0-9]* s$`).MatchString(out) {
+	if !regexp.MustCompile(`(?m)^test: sh \.yardr/test @ [0-9a-f]+: pass, [0-9]+ packages ok, 0 failed, [0-9]+ s, waited [1-9][0-9]* s` + comparedEnd + `$`).MatchString(out) {
 		t.Errorf("the summary of %s does not include the race-lock wait:\n%s", who, out)
 	}
 }
