@@ -4,7 +4,8 @@
 // objects: it shows each whole, as it shows a changed file, and approval
 // overwrites what the yard has, held to the hash of what the card showed.
 // Like --yes, a take is a whole card's: it is never summarised, and it keeps
-// no other copy of what it overwrites. The terminal's own --take is the
+// no other copy of what it overwrites, but for a stage file's text, which the
+// import keeps in the stage history first. The terminal's own --take is the
 // pack's (internal/pack, keep.go); this is the card's door to it.
 package store
 
@@ -149,13 +150,20 @@ func (w *wtx) packTakeStrays(name string, reading *PackReading, take []string) e
 
 // packTakeDoes appends the card's own sentence for each object it takes:
 // approval sets the pack's version over what the yard changed and keeps no
-// other copy of that change, as packYesDoes says of an edited file. The
-// object's own line above shows what changes, whole, and packCardWhole has
-// held each name to an object of the plan that is shown so.
-func packTakeDoes(does []string, take []string) []string {
+// other copy of that change, as packYesDoes says of an edited file, but for a
+// stage file, whose text the import keeps in the stage history first
+// (KeepStageFile). Whether a file is one is the plan's object's to say
+// (objects, the reading's), not its name's. The object's own line above shows
+// what changes, whole, and packCardWhole has held each name to an object of
+// the plan that is shown so.
+func packTakeDoes(does []string, take []string, objects []AskPlanObject) []string {
 	for _, t := range take {
 		kind, name, _ := strings.Cut(t, "/")
 		if kind == "file" {
+			if slices.ContainsFunc(objects, func(o AskPlanObject) bool { return o.Kind == kind && o.Name == name && o.StageFile }) {
+				does = append(does, fmt.Sprintf("file %s: approval overwrites the yard's changed copy with the pack's bytes; the yard's text is kept in <home>/stage-history/, named by its sha256.", name))
+				continue
+			}
 			does = append(does, fmt.Sprintf("file %s: approval overwrites the yard's changed copy with the pack's bytes and keeps no other copy of the change.", name))
 			continue
 		}

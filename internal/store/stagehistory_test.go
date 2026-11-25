@@ -375,6 +375,209 @@ func TestArchiveStageFile(t *testing.T) {
 	}
 }
 
+// A write that is not the store's own (a pack's import) keeps what stands as a
+// save does: the text of a file that has text in it and that the write would
+// change, whole, read-only and under its digest, answered by the path that
+// keeps it as the home is given, and nothing for a file that stands as none
+// (no file, only white space) or holds the text already, not even the
+// directory. What cannot be kept is refused, as is a name that is no flow's or
+// stage's, with nothing written: the stage file and the history stay as they
+// were, and nothing goes through a link.
+func TestKeepStageFile(t *testing.T) {
+	t.Parallel()
+	const flow = "starter.default"
+	// home is not resolved through its links, so that the answer is told apart
+	// from the real path of a home that has some (macOS's temp directory).
+	stand := func(t *testing.T, home, stage, text string) string {
+		t.Helper()
+		file := filepath.Join(HomeStageDir(home, flow), filepath.FromSlash(stage)+".md")
+		if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(file, []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return file
+	}
+	// names are what the stage history holds, none where it does not stand.
+	names := func(t *testing.T, home string) []string {
+		t.Helper()
+		entries, err := os.ReadDir(StageHistoryDir(home))
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, e := range entries {
+			out = append(out, e.Name())
+		}
+		return out
+	}
+	// tree is every path under dir (a link is listed and not followed), so that
+	// what a refused keep wrote through a link shows.
+	tree := func(t *testing.T, dir string) []string {
+		t.Helper()
+		var out []string
+		if err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+			out = append(out, path)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+
+	for _, c := range []struct {
+		name, stage string
+		stands      string // "" for no file
+		next        string
+		keeps       string // the text kept, "" for nothing
+	}{
+		{"no file", "review", "", "New.\n", ""},
+		{"a file with nothing in it", "review", " \n\t\n", "New.\n", ""},
+		{"the text that stands", "review", "Old.\n", "Old.\n", ""},
+		{"another text", "review", "Old.\n", "New.\n", "Old.\n"},
+		{"nothing over a text", "review", "Old.\n", " \n", "Old.\n"},
+		{"another text, a stage whose name holds a slash", "qa/smoke", "Old.\n", "New.\n", "Old.\n"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			home := t.TempDir()
+			file := ""
+			if c.stands != "" {
+				file = stand(t, home, c.stage, c.stands)
+			}
+			got, err := KeepStageFile(home, flow, c.stage, []byte(c.next))
+			if err != nil {
+				t.Fatalf("KeepStageFile = %q, %v", got, err)
+			}
+			if c.keeps == "" {
+				if got != "" || names(t, home) != nil {
+					t.Errorf("KeepStageFile = %q, and the stage history holds %v: want nothing kept, and no directory made", got, names(t, home))
+				}
+				return
+			}
+			if want := StageHistoryPath(home, sha256Hex(c.keeps)); got != want {
+				t.Fatalf("KeepStageFile = %q, want %q, the path under the home as it is given", got, want)
+			}
+			if info, err := os.Lstat(got); err != nil || info.Mode() != 0o400 {
+				t.Errorf("the kept file is %v, %v, want a plain file at -r--------", info, err)
+			}
+			if text, err := os.ReadFile(got); err != nil || string(text) != c.keeps {
+				t.Errorf("the kept file holds %q, %v, want %q", text, err, c.keeps)
+			}
+			if text, _ := os.ReadFile(file); string(text) != c.keeps {
+				t.Errorf("the stage file holds %q: keeping it is no write of it", text)
+			}
+			if again, err := KeepStageFile(home, flow, c.stage, []byte(c.next)); err != nil || again != got || len(names(t, home)) != 1 {
+				t.Errorf("keeping it again = %q, %v with %v kept, want the same file once", again, err, names(t, home))
+			}
+		})
+	}
+
+	for _, c := range []struct {
+		name, flow, stage, want string
+		// plant puts what stands in the way where the text "Old.\n" stands, in
+		// the home, and may use other, a directory outside it with a decoy.
+		plant func(t *testing.T, home, other string)
+	}{
+		{"a link at the file", flow, "review", "is a symbolic link", func(t *testing.T, home, other string) {
+			file := stand(t, home, "review", "Old.\n")
+			if err := os.Remove(file); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(filepath.Join(other, "decoy"), file); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"a link for the flow's directory", flow, "review", "is a symbolic link", func(t *testing.T, home, other string) {
+			if err := os.WriteFile(filepath.Join(other, "review.md"), []byte("Old.\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(FlowsDir(home), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(other, HomeStageDir(home, flow)); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"a link for the flows directory", flow, "review", "is a symbolic link", func(t *testing.T, home, other string) {
+			if err := os.MkdirAll(filepath.Join(other, flow), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(other, flow, "review.md"), []byte("Old.\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(other, FlowsDir(home)); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"a directory at the file", flow, "review", "is not a regular file", func(t *testing.T, home, other string) {
+			if err := os.MkdirAll(filepath.Join(HomeStageDir(home, flow), "review.md"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"other text at the name its digest gives", flow, "review", "holds other text than its name says", func(t *testing.T, home, other string) {
+			stand(t, home, "review", "Old.\n")
+			if err := os.MkdirAll(StageHistoryDir(home), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(StageHistoryPath(home, sha256Hex("Old.\n")), []byte("Else.\n"), 0o400); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		// A name that leads out of the flows directory is checked before anything
+		// is read: a file stands where the home's other directory would be read.
+		{"a flow's name that leads out", "../outside", "review", "flow name", func(t *testing.T, home, other string) {
+			if err := os.MkdirAll(filepath.Join(home, "outside"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(home, "outside", "review.md"), []byte("Old.\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"a flow's name with a slash", "a/b", "review", "flow name", func(t *testing.T, home, other string) {}},
+		{"no flow's name", "", "review", "flow name", func(t *testing.T, home, other string) {}},
+		{"a stage's name that leads out", flow, "../review", "is no name of a stage file", func(t *testing.T, home, other string) {
+			stand(t, home, "review", "Old.\n")
+		}},
+		{"no stage's name", flow, "", "is no name of a stage file", func(t *testing.T, home, other string) {}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			home, other := t.TempDir(), t.TempDir()
+			if err := os.WriteFile(filepath.Join(other, "decoy"), []byte("Not here.\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			c.plant(t, home, other)
+			before, beyond := names(t, home), tree(t, other)
+
+			got, err := KeepStageFile(home, c.flow, c.stage, []byte("New.\n"))
+			if err == nil || !strings.Contains(err.Error(), c.want) || got != "" {
+				t.Fatalf("KeepStageFile = %q, %v, want it refused, with %q", got, err, c.want)
+			}
+			if after := names(t, home); !slices.Equal(after, before) {
+				t.Errorf("the refused keep left the stage history holding %v, was %v", after, before)
+			}
+			if left, _ := filepath.Glob(filepath.Join(StageHistoryDir(home), ".yardr-history-*")); len(left) > 0 {
+				t.Errorf("the refused keep left %v", left)
+			}
+			if after := tree(t, other); !slices.Equal(after, beyond) {
+				t.Errorf("something was written through a link: %v, was %v", after, beyond)
+			}
+			if text, _ := os.ReadFile(filepath.Join(other, "decoy")); string(text) != "Not here.\n" {
+				t.Errorf("the file the link names holds %q", text)
+			}
+		})
+	}
+
+	// A write with no home to keep in is refused as a save is.
+	if got, err := KeepStageFile("", flow, "review", []byte("New.\n")); err == nil || !strings.Contains(err.Error(), errNoStageHome.Error()) || got != "" {
+		t.Errorf("KeepStageFile with no home = %q, %v, want it refused", got, err)
+	}
+}
+
 // What the history reads back is the text its name says, and anything else is
 // no text: a link, a file that is no plain one, a rewrite or a truncation, bytes
 // that are no text, a text longer than a card carries, a link for the

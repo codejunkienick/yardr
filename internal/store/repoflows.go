@@ -323,7 +323,7 @@ func (s *Store) PutStageFile(ctx context.Context, flow, stage, text, expectDiges
 // expect, and the file put in its place.
 //
 // A file with text in it that the write replaces is kept first, in the home's
-// stage history (archiveStageFile), and one that stands as none (no file, or
+// stage history (stageStand.keep), and one that stands as none (no file, or
 // one with nothing in it) leaves nothing to keep.
 //
 // A batch may run a write twice, and a file its first run wrote stays when
@@ -358,11 +358,8 @@ func (w *wtx) putStageFile(ctx context.Context, flow, stage, text, expect, actor
 			// Kept before it goes, and the write refused where it cannot be:
 			// a copy left by a write that then fails holds nothing that is not
 			// the file's own, named by its bytes.
-			if st.digest != stageNone {
-				if err := archiveStageFile(filepath.Dir(st.root), st.digest, []byte(st.text)); err != nil {
-					return nil, fmt.Errorf("stage file of %s in flow %s: keep the text it replaces: %w", stage, flow, err)
-				}
-				prevDigest, prevText = st.digest, st.text
+			if prevDigest, prevText, err = st.keep([]byte(text)); err != nil {
+				return nil, fmt.Errorf("stage file of %s in flow %s: keep the text it replaces: %w", stage, flow, err)
 			}
 			if err := st.write(text); err != nil {
 				return nil, fmt.Errorf("stage file of %s in flow %s: %w", stage, flow, err)

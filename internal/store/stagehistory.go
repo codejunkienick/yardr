@@ -146,6 +146,47 @@ func archiveStageFile(homeReal, digest string, raw []byte) (err error) {
 	return os.Rename(name, path)
 }
 
+// keep is the step every write that replaces a stage file shares: the text
+// that stands is kept (archiveStageFile) before next goes over it, and the
+// write is refused where that cannot be done, so a text is never replaced
+// unkept. It answers the digest and the text it kept, which a write that
+// records what it replaced takes as that, and "" for both where there was
+// nothing to keep: no file, or one with nothing in it (stageNone), or one
+// that holds next already, which the write leaves as it is.
+func (st *stageStand) keep(next []byte) (prevDigest, prevText string, err error) {
+	if st.digest == stageNone || st.digest == stageDigest(next) {
+		return "", "", nil
+	}
+	if err := archiveStageFile(filepath.Dir(st.root), st.digest, []byte(st.text)); err != nil {
+		return "", "", err
+	}
+	return st.digest, st.text, nil
+}
+
+// KeepStageFile keeps the text that stands at the stage file of stage in the
+// store flow flow under home before a write that is not the store's own (a
+// pack's import, internal/pack) puts next over it, as a save of the file keeps
+// it. It answers where the text is kept, as the home is given, or "" where
+// there was nothing to keep (keep says when). Its errors are standStage's and
+// keep's, as they are, and mean the write must not go on. The flow's name is
+// checked here, since standStage takes it checked and a save has had that done
+// by the time it asks: a name that leads out of the flows directory is no
+// flow's.
+func KeepStageFile(home, flow, stage string, next []byte) (kept string, err error) {
+	if !validFlowName.MatchString(flow) {
+		return "", fmt.Errorf("flow name %q: use letters, digits, '.', '_' or '-'", flow)
+	}
+	st, err := standStage(home, flow, stage)
+	if err != nil {
+		return "", err
+	}
+	prev, _, err := st.keep(next)
+	if err != nil || prev == "" {
+		return "", err
+	}
+	return st.history, nil
+}
+
 // readStageHistory reads the text the stage history keeps under the SHA-256
 // digest, for a caller that can do without it: "", false where none is kept,
 // and where what stands there cannot be taken for the text its name says (a

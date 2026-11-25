@@ -372,7 +372,10 @@ func askPlanCarriesTakenWhole(t *testing.T) {
 // askPlanFrom marks each installed file for a --yes card: whether its copy
 // was edited by hand, and whether the yard runs it — a program, a role or
 // a script, not a stage file or the page frame, which only a reader's
-// browser runs.
+// browser runs. It marks a stage file of the pack's flows too, which a card
+// that takes it says its text is kept for: the plan's own mark of a flow and
+// a stage, and not a file of the flow's directory that the pack does not
+// carry, which has a flow and no stage.
 func askPlanMarksEditedAndRuns(t *testing.T) {
 	t.Helper()
 	read := func(rel string) ([]byte, error) { return nil, fs.ErrNotExist }
@@ -381,7 +384,9 @@ func askPlanMarksEditedAndRuns(t *testing.T) {
 		Objects: []pack.Object{
 			{Kind: "file", Name: "roles/a.md", Action: pack.Change, Edited: true, File: &pack.FileOp{To: "nowhere/a.md", Mode: "0644"}},
 			{Kind: "file", Name: "scripts/land", Action: pack.Change, File: &pack.FileOp{To: "nowhere/land", Mode: "0755"}},
-			{Kind: "file", Name: "flows/default/new.md", Action: pack.Change, File: &pack.FileOp{To: "nowhere/new.md", Flow: "mini.default"}},
+			{Kind: "file", Name: "flows/default/new.md", Action: pack.Change, File: &pack.FileOp{To: "nowhere/new.md", Flow: "mini.default", Stage: "new"}},
+			{Kind: "file", Name: "flows/default/qa/smoke.md", Action: pack.Kept, File: &pack.FileOp{To: "nowhere/qa/smoke.md", Flow: "mini.default", Stage: "qa/smoke"}},
+			{Kind: "file", Name: "flows/mini.default/notes.md", Action: pack.NotInPack, File: &pack.FileOp{To: "nowhere/notes.md", Flow: "mini.default"}},
 			{Kind: "file", Name: "page.html", Action: pack.Change, File: &pack.FileOp{To: "nowhere/page.html", Mode: "0644"}},
 		},
 	}
@@ -390,21 +395,23 @@ func askPlanMarksEditedAndRuns(t *testing.T) {
 		t.Fatalf("the plan's edited = %q, want the role's line", got.Edited)
 	}
 	for _, want := range []struct {
-		name         string
-		edited, runs bool
+		name                string
+		edited, runs, stage bool
 	}{
-		{"roles/a.md", true, true},
-		{"scripts/land", false, true},
-		{"flows/default/new.md", false, false},
-		{"page.html", false, false},
+		{"roles/a.md", true, true, false},
+		{"scripts/land", false, true, false},
+		{"flows/default/new.md", false, false, true},
+		{"flows/default/qa/smoke.md", false, false, true},
+		{"flows/mini.default/notes.md", false, false, false},
+		{"page.html", false, false, false},
 	} {
 		i := slices.IndexFunc(got.Objects, func(o store.AskPlanObject) bool { return o.Name == want.name })
 		if i < 0 {
 			t.Fatalf("the plan holds no %s", want.name)
 		}
-		if got.Objects[i].Edited != want.edited || got.Objects[i].Runs != want.runs {
-			t.Errorf("%s: edited %v runs %v, want edited %v runs %v",
-				want.name, got.Objects[i].Edited, got.Objects[i].Runs, want.edited, want.runs)
+		if g := got.Objects[i]; g.Edited != want.edited || g.Runs != want.runs || g.StageFile != want.stage {
+			t.Errorf("%s: edited %v runs %v stage file %v, want edited %v runs %v stage file %v",
+				want.name, g.Edited, g.Runs, g.StageFile, want.edited, want.runs, want.stage)
 		}
 	}
 }

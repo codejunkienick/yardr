@@ -418,6 +418,7 @@ func askPlanFrom(read func(rel string) ([]byte, error), plan *pack.Plan, answers
 			// file, and not the page frame, which only a reader's
 			// browser runs.
 			ao.Runs = o.File.Flow == "" && (plan.Frame == nil || o.Name != plan.Frame.File)
+			ao.StageFile = o.File.StageFile()
 		}
 		for _, ch := range o.Changes {
 			ao.Changes = append(ao.Changes, store.AskChange{Field: ch.Field, Old: planValue(ch.Old), New: planValue(ch.New)})

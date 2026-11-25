@@ -20,20 +20,25 @@ func takeSum(text string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// takeFile is a kept file of a plan as the server's reading carries one a card
+// takes, with both its hashes, text and diff: one the yard runs (a role), or a
+// stage file of the pack's flows, which the reading marks as the plan's object
+// says (StageFile), whatever the file is called.
+func takeFile(name, old, new string, runs, stage bool) AskPlanObject {
+	return AskPlanObject{Kind: "file", Name: name, Action: "kept", Runs: runs, StageFile: stage,
+		Keeps:      []string{"the yard's copy, changed since the last import (the pack's has not changed since); --take file/" + name + " takes the pack's"},
+		FileOldSHA: takeSum(old), FileNewSHA: takeSum(new), Text: new, Diff: Unified(old, new)}
+}
+
 // takePlan is a depot plan that keeps what the yard changed of a role, a
 // stage file and two flows, as the server's reading carries a kept object a
 // card takes: the role and the stage file with both their hashes, text and
 // diff, and the first flow with the digest of the one the yard has. The
 // second flow is kept and not taken, so it carries nothing whole.
 func takePlan() *AskPlan {
-	role := func(name, old, new string, runs bool) AskPlanObject {
-		return AskPlanObject{Kind: "file", Name: name, Action: "kept", Runs: runs,
-			Keeps:      []string{"the yard's copy, changed since the last import (the pack's has not changed since); --take file/" + name + " takes the pack's"},
-			FileOldSHA: takeSum(old), FileNewSHA: takeSum(new), Text: new, Diff: Unified(old, new)}
-	}
 	return &AskPlan{Objects: []AskPlanObject{
-		role("roles/b.md", "role by hand\n", "role by the pack\n", true),
-		role("flows/default/new.md", "stage by hand\n", "stage by the pack\n", false),
+		takeFile("roles/b.md", "role by hand\n", "role by the pack\n", true, false),
+		takeFile("flows/default/new.md", "stage by hand\n", "stage by the pack\n", false, true),
 		{Kind: "flow", Name: "starter.default", Action: "kept",
 			Changes:    []AskChange{{Field: "stages", Old: "in, work, done", New: "in, done"}},
 			Keeps:      []string{"the yard's flow, changed since the last import (the pack's has not changed since); --take flow/starter.default takes the pack's"},
@@ -142,6 +147,26 @@ func packApplyTakeShowsKeptWhole(t *testing.T) {
 			t.Errorf("%s: weight = %+v, want strong code saying %q", c.words, ws, c.says)
 		}
 	}
+	// A stage file's text is kept in the stage history before the pack's goes
+	// over it, and the card says so in place of "keeps no other copy"; a role
+	// keeps today's sentence. Which file is a stage's is the reading's to say,
+	// not its name's: a file called like one that the reading does not mark
+	// keeps today's sentence too.
+	lookalike := takePlan()
+	lookalike.Objects = append(lookalike.Objects, takeFile("flows/default/decide.md", "decide by hand\n", "decide by the pack\n", true, false))
+	y.setPack(&fakePack{label: "embedded in yardr test1", kind: "git", depot: "web", plan: lookalike, noSources: true})
+	staged := packAsk()
+	staged.Run.Argv = []string{"pack apply starter --depot web --take file/roles/b.md --take file/flows/default/new.md --take file/flows/default/decide.md"}
+	stagedDoes := y.asked(t, y.ask(t, staged, "yardmaster")).Ask.Run.Does
+	const overwrites = "approval overwrites the yard's changed copy with the pack's bytes"
+	strongHas(t, stagedDoes,
+		"file flows/default/decide.md: "+overwrites+" and keeps no other copy of the change.",
+		"file flows/default/new.md: "+overwrites+"; the yard's text is kept in <home>/stage-history/, named by its sha256.",
+		"file roles/b.md: "+overwrites+" and keeps no other copy of the change.")
+	if joined := strings.Join(stagedDoes, "\n"); strings.Count(joined, "stage-history") != 1 {
+		t.Errorf("the card names the stage history for more than the stage file:\n%s", joined)
+	}
+
 	// A take is a whole card's, as --yes is: where the pack's texts and diffs
 	// run past the bound a card that takes is refused, never summarised.
 	big := takePlan()

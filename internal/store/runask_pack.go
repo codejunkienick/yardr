@@ -62,6 +62,9 @@ type AskPlanObject struct {
 	Runs    bool     `json:"runs,omitempty"`
 	Keeps   []string `json:"keeps,omitempty"`
 	Shadows []string `json:"shadows,omitempty"`
+	// StageFile says the file is a stage's of one of the pack's flows: an
+	// approval that takes it keeps the yard's text in the stage history first.
+	StageFile bool `json:"stage_file,omitempty"`
 	// Env are the assignments a script group the import creates has
 	// before its script in its cmd, from the pack's env: part of what the
 	// approval has the yard write, so the card shows them and the carrying
@@ -494,7 +497,7 @@ func (w *wtx) packApplyCard(run AskRun, asking bool) (AskRun, error) {
 				return AskRun{}, err
 			}
 		}
-		card.Does = packTakeDoes(packYesDoes(does, shown), take)
+		card.Does = packTakeDoes(packYesDoes(does, shown), take, reading.Plan.Objects)
 		card.Pack.Plan = reading.Plan
 		card.Pack.Yes = len(shown) > 0
 		card.Description = fmt.Sprintf("Import a pack into depot %s: set the yard to what the pack says", reading.Depot)

@@ -1013,7 +1013,9 @@ nothing else. What is not the same:
   sets to the pack's, each as the plan prints it, such as
   `flow/starter.default`) is always whole: its `run.pack.plan` still says
   `kept` of each, and carries a kept file's hashes, text and diff and a kept
-  flow's `flow_old_sha256`, the digest of the flow it overwrites.
+  flow's `flow_old_sha256`, the digest of the flow it overwrites. A kept file
+  that is a stage file of the pack's flows is marked `stage_file`: approval
+  keeps the yard's text of it in the stage history first.
 - **`Bead`, `UserAsks` and `UserOpenAsks` tell a run ask as its asker typed it, to a device
   that is no operator's.** The `run` card has `argv`, `command` and
   `description`, and an approved ask's `ran` has `argv` and `failed`; a

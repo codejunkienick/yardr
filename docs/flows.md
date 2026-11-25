@@ -648,7 +648,9 @@ text it replaces is refused, with the stage file as it was: a symbolic link,
 a file that is no plain one or other text stands at the name its digest gives,
 or `stage-history` is a symbolic link or no directory. Nothing prunes the
 directory (`yardr store prune` sweeps `blobs/` alone), so a kept text stays
-until its file is removed. Saving a kept file puts its text back:
+until its file is removed. An import of a pack that writes a stage file over
+a text that stands keeps it the same way ([A pack is a starting
+point](packs.md#yardr-pack-apply)). Saving a kept file puts its text back:
 
 ```
 yardr flow set-stage code review -f <home>/stage-history/<sha256>
@@ -688,9 +690,11 @@ save keeps it, and the card's take-back names the file: `yardr flow set-stage
 the card says so: it sets the yard's copy of the stage file and changes
 nothing of the pack, and `yardr pack apply` then keeps the yard's copy,
 whatever the pack moves, and sets the pack's only where it is told to
-(`--take file/<name>`, the name `yardr pack check <pack>` gives the file).
-Either way the write is recorded as `flow_set`, with the `stage` beside the
-`flow`, and the `digest` and `prev_digest` above.
+(`--take file/<name>`, the name `yardr pack check <pack>` gives the file),
+keeping the yard's text in the stage history first. A pack apply does not
+write a `flow_set` event. A save through `yardr flow set-stage` is recorded
+as `flow_set`, with the `stage` beside the `flow`, and the `digest` and
+`prev_digest` above.
 
 The operator's paired device makes the same save with no card
 ([`PutStageFile`](api.md#putstagefile)). The call says `weighed`, which its

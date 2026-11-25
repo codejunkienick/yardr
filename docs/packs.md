@@ -514,7 +514,7 @@ neither to the store nor under the home:
 | `not in the pack` | the yard has it, the pack does not, and no import of this pack brought it: an import leaves it alone |
 | `no longer in it` | an earlier import of this pack into the depot brought it and the pack has dropped it since: left alone unless the import is told to prune ([Pruning](#pruning)) |
 | `takes` | a group the yard has takes a group of the pack, as it is (`--group`): nothing of it would be changed, and it is not recorded as the pack's ([Groups](#how-a-pack-maps-to-the-yard)) |
-| `kept` | the yard changed this flow, stage file or role prompt since the last import (or, for a flow, nothing records what the last import wrote): the import leaves it as the yard has it, the line under it says which and why, and `--take <kind>/<name>` sets the pack's ([A pack is a starting point](#yardr-pack-apply)) |
+| `kept` | the yard changed this flow, stage file or role prompt since the last import (or, for a flow, nothing records what the last import wrote): the import leaves it as the yard has it, the line under it says which and why, and `--take <kind>/<name>` sets the pack's ([A pack is a starting point](#yardr-pack-apply)). A take of a stage file keeps the yard's text first, in `<home>/stage-history/<sha256>`, and `yardr flow set-stage <flow> <stage> -f <home>/stage-history/<sha256>` puts it back ([flows.md](flows.md#stage-files-what-a-stage-is-for)) |
 | `shadows …` under an object | a file of the depot that is not used while the object is as the pack sets it: the depot's own `.yardr/roles/builder.md`, under a group prompted from the pack's copy |
 | `kept: …` under an object | something the pack carries and the import leaves as the yard has it, with the reason: a flow, stage file or role the yard changed (`kept` above); a prompt on an existing group that points elsewhere; a command on an existing script group that differs from the pack's; a depot role kept with `--depot-roles`; or the role, script or limit of a group that takes the pack's |
 | `edited by hand since the last import: …` under a script or the page frame | the installed copy is neither what the last import installed nor what the pack has now: `pack apply` overwrites it only with `--yes` ([below](#yardr-pack-apply)). A flow the pack has dropped is stopped the same way, in the words `flow <name> was edited since the last import` |
@@ -1422,6 +1422,15 @@ not have and one it has but does not keep refuses the whole import, each in
 its own words. `--yes` does not take: it overwrites a script or a frame, and
 no flow, stage file or role.
 
+A take of a stage file keeps the yard's text first, in
+`<home>/stage-history/<sha256>` as a save of it does ([Stage files](flows.md#stage-files-what-a-stage-is-for)),
+and `yardr flow set-stage <flow> <stage> -f <home>/stage-history/<sha256>`
+puts it back. Any write of a stage file over a text that stands keeps that
+text so, the pack's own change included, which goes over the text the last
+import wrote; where it cannot be kept (the file or a directory it stands in
+is a symbolic link, or the history holds other text under that digest) the
+import stops there and the file is as it was.
+
 A script is the yard's to run and the frame its pages' look, and a hand edit
 of either is a change to what the pack says, not to a starting point, so
 those keep the stop below. The commands of a declared source are copied again
@@ -2140,8 +2149,8 @@ the plan prints the object (`flow/starter.default`,
 `file/roles/builder.md`; repeatable, and bare or with a depot), the card sets
 the pack's version of that object instead: it shows each one whole, a file
 with both hashes and the diff and a flow with the stages that differ, says
-that approval keeps no other copy of the yard's change, and is never a
-summary. The approval is held to what the card showed: the copy of a file it
+that approval keeps no other copy of the yard's change, except a stage file's
+text, which goes to `<home>/stage-history/` first, and is never a summary. The approval is held to what the card showed: the copy of a file it
 overwrites, and the digest of the flow it sets, so a copy changed after the
 card is stale, and nothing runs. A name the plan cannot carry out (a declared
 source, an object the plan has not or does not keep), and a flow whose pack

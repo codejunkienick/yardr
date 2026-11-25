@@ -94,7 +94,9 @@ const askRunList = `  peer add <name> <invite>
       stage file or role the plan keeps because the yard changed it
       (named as the plan prints it, flow/starter.default), which the
       card shows whole and approval sets to the pack's, keeping no
-      other copy, and a take the plan cannot carry out is refused;
+      other copy but a stage file's text, which goes to the stage
+      history first, and a take the plan cannot carry out is
+      refused;
       any other URL, an imported pack, a directory outside every
       checkout, any other flag and a plan that asks stay in a
       terminal; --setup installs a pack of kind source, embedded or

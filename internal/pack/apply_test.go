@@ -1118,11 +1118,43 @@ func TestApplyGivesNewAgentsTheirArguments(t *testing.T) {
 	}
 }
 
+// stageHistory is what the stage history of the yard in home holds, each kept
+// text by the digest it is kept under, and nil where the directory does not
+// stand. A kept text is a plain file, read-only.
+func stageHistory(t *testing.T, home string) map[string]string {
+	t.Helper()
+	dir := store.StageHistoryDir(home)
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]string{}
+	for _, e := range entries {
+		path := filepath.Join(dir, e.Name())
+		if info, err := os.Lstat(path); err != nil || info.Mode() != 0o400 {
+			t.Errorf("the kept text %s is %v, %v, want a plain file at -r--------", e.Name(), info, err)
+		}
+		text, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out[e.Name()] = string(text)
+	}
+	return out
+}
+
 // A pack's stage files are copied to where the yard reads a store flow's,
 // <home>/flows/<pack>.<flow>/<stage>.md, so after the import every stage a
 // bead is worked in has its file. They are recorded like the pack's other
 // files: a second import changes nothing, and a copy edited by hand is not
-// overwritten unasked.
+// overwritten unasked. A stage file the import writes over is kept first, in
+// the stage history a save of it keeps its text in: the yard's text where the
+// import is told to take the pack's, and the text the last import wrote where
+// the pack's own change goes over it; a text that stands already, or no file,
+// leaves nothing to keep; and a link where the file stands is refused with
+// nothing written.
 func TestStageFilesGoWhereTheYardReadsThem(t *testing.T) {
 	st, o := yard(t)
 	dir := copyStarter(t)
@@ -1133,6 +1165,11 @@ func TestStageFilesGoWhereTheYardReadsThem(t *testing.T) {
 		t.Fatalf("new.md = %+v, file %+v\nwant %+v", f, f.File, want)
 	}
 	apply(t, st, plan, answers)
+	// A file that did not stand replaces nothing: nothing is kept, and the
+	// directory is not made.
+	if got := stageHistory(t, o.Home); got != nil {
+		t.Fatalf("creating the stage files made the stage history %v", got)
+	}
 
 	flow, err := st.GetFlow(ctx, "starter.default")
 	if err != nil {
@@ -1188,6 +1225,10 @@ func TestStageFilesGoWhereTheYardReadsThem(t *testing.T) {
 			t.Fatalf("applying with %+v took the pack's stage file: %q", o, text)
 		}
 	}
+	// Nothing was written above, so nothing was kept.
+	if got := stageHistory(t, o.Home); got != nil {
+		t.Fatalf("an import that wrote no stage file made the stage history %v", got)
+	}
 	res, err := pack.Apply(ctx, st, plan, pack.ApplyOptions{Actor: "me", Prune: true, Take: []string{"file/flows/default/new.md"}})
 	if err != nil || res.Changed != 1 || len(res.Kept) != 0 {
 		t.Fatalf("taking it: %+v, %v", res, err)
@@ -1197,6 +1238,122 @@ func TestStageFilesGoWhereTheYardReadsThem(t *testing.T) {
 	}
 	if text, _ := os.ReadFile(own); string(text) != "ours\n" {
 		t.Fatalf("the import touched a stage file it did not bring: %q", text)
+	}
+	// The yard's text it overwrote is kept, whole, under its digest.
+	const edited = "edited in the yard\n"
+	if got, held := stageHistory(t, o.Home), map[string]string{sumOf(edited): edited}; !reflect.DeepEqual(got, held) {
+		t.Fatalf("the stage history after the take holds %v, want %v", got, held)
+	}
+
+	// A write of the text that stands, here for its mode, has nothing to keep.
+	if err := os.Chmod(to, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	plan = build(t, st, load(t, dir), o)
+	if f := find(t, plan, "file", "flows/default/new.md"); f.Action != pack.Change || len(f.Changes) != 1 || f.Changes[0].Field != "mode" {
+		t.Fatalf("new.md after a chmod = %+v", f)
+	}
+	if res := apply(t, st, plan, nil); res.Changed != 1 {
+		t.Fatalf("applying over a chmod: %+v", res)
+	}
+	if got := stageHistory(t, o.Home); len(got) != 1 {
+		t.Fatalf("a write of the text that stands made the stage history %v, want nothing new", got)
+	}
+
+	// The pack's own change, taken or not, goes over the text the last import
+	// wrote, and that is kept the same way.
+	const moved = "the pack's, next edition\n"
+	if err := os.WriteFile(filepath.Join(dir, "flows", "default", "new.md"), []byte(moved), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	plan = build(t, st, load(t, dir), o)
+	if f := find(t, plan, "file", "flows/default/new.md"); f.Action != pack.Change {
+		t.Fatalf("new.md after the pack moved = %+v, want a change", f)
+	}
+	apply(t, st, plan, nil)
+	if text, _ := os.ReadFile(to); string(text) != moved {
+		t.Fatalf("after the pack moved: %q", text)
+	}
+	if got, held := stageHistory(t, o.Home), map[string]string{sumOf(edited): edited, sumOf(string(want)): string(want)}; !reflect.DeepEqual(got, held) {
+		t.Fatalf("the stage history after the pack moved holds %v, want %v", got, held)
+	}
+
+	// A link where the stage file stands is refused, and nothing is written:
+	// the link, what it names, the history and the yard's record stay as they
+	// were, though the import is told to take the pack's text.
+	linked := filepath.Join(t.TempDir(), "linked.md")
+	if err := os.WriteFile(linked, []byte("linked\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(to); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(linked, to); err != nil {
+		t.Fatal(err)
+	}
+	plan = build(t, st, load(t, dir), o)
+	if f := find(t, plan, "file", "flows/default/new.md"); f.Action != pack.Kept {
+		t.Fatalf("new.md as a link to another text = %+v, want it kept", f)
+	}
+	before := head(t, st)
+	_, err = pack.Apply(ctx, st, plan, pack.ApplyOptions{Actor: "me", Take: []string{"file/flows/default/new.md"}})
+	if err == nil || !strings.Contains(err.Error(), "keep the text it replaces") || !strings.Contains(err.Error(), "is a symbolic link") {
+		t.Fatalf("taking a stage file that is a link: %v, want it refused", err)
+	}
+	if info, err := os.Lstat(to); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("the stage file after the refused take is %v, %v, want the link", info, err)
+	}
+	if text, _ := os.ReadFile(linked); string(text) != "linked\n" {
+		t.Errorf("the file the link names holds %q after the refused take", text)
+	}
+	if got := stageHistory(t, o.Home); len(got) != 2 {
+		t.Errorf("the refused take left the stage history %v, want the two it had", got)
+	}
+	if got := kinds(t, st, before); len(got) != 0 {
+		t.Errorf("the refused take wrote %v", got)
+	}
+	t.Run("nested stage name", nestedStageFileIsKept)
+}
+
+// nestedStageFileIsKept is the nested-stage step of
+// TestStageFilesGoWhereTheYardReadsThem: its file is a directory deeper, and
+// the plan's object says which file is a stage's, which the path cannot.
+func nestedStageFileIsKept(t *testing.T) {
+	t.Helper()
+	const nested = `name: nest
+flows:
+  default:
+    stages:
+      new:      { group: people, file: flows/default/new.md, manual: [qa/smoke] }
+      qa/smoke: { group: people, file: flows/default/qa/smoke.md, manual: [done] }
+      done:     { end: true }
+groups:
+  people: { people: true }
+`
+	st, o := yard(t)
+	dir := writePack(t, map[string]string{"pack.yaml": nested, "flows/default/new.md": "new\n", "flows/default/qa/smoke.md": "smoke\n"})
+	apply(t, st, build(t, st, load(t, dir), o), nil)
+	to := filepath.Join(o.Home, "flows", "nest.default", "qa", "smoke.md")
+	if text, _ := os.ReadFile(to); string(text) != "smoke\n" {
+		t.Fatalf("the nested stage's file after the import: %q", text)
+	}
+	if err := os.WriteFile(to, []byte("edited\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	plan := build(t, st, load(t, dir), o)
+	f := find(t, plan, "file", "flows/default/qa/smoke.md")
+	if f.Action != pack.Kept || f.File.Flow != "nest.default" || f.File.Stage != "qa/smoke" || !f.File.StageFile() {
+		t.Fatalf("the nested stage's file = %+v, file %+v, want it kept, the file of qa/smoke in nest.default", f, f.File)
+	}
+	res, err := pack.Apply(ctx, st, plan, pack.ApplyOptions{Actor: "me", Take: []string{"file/flows/default/qa/smoke.md"}})
+	if err != nil || res.Changed != 1 {
+		t.Fatalf("taking it: %+v, %v", res, err)
+	}
+	if text, _ := os.ReadFile(to); string(text) != "smoke\n" {
+		t.Fatalf("after the take: %q", text)
+	}
+	if got, held := stageHistory(t, o.Home), map[string]string{sumOf("edited\n"): "edited\n"}; !reflect.DeepEqual(got, held) {
+		t.Fatalf("the stage history after the take holds %v, want %v", got, held)
 	}
 }
 

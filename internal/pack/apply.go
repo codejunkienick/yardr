@@ -617,6 +617,16 @@ func write(ctx context.Context, st store.API, p *Plan, obj *Object, o ApplyOptio
 	answer := func(field string) (string, bool) { return answerOf(obj, field) }
 	switch obj.Kind {
 	case "file":
+		// A stage file with text in it is kept first, in the history a save of it
+		// keeps its text in, and the import stops here where that cannot be
+		// done: a text is never replaced unkept. It holds for every write of a
+		// stage file, not for a take alone, since the pack's own change goes
+		// over the text the last import wrote.
+		if obj.File.StageFile() {
+			if _, err := store.KeepStageFile(p.Home, obj.File.Flow, obj.File.Stage, ck.files[obj.File.To]); err != nil {
+				return fmt.Errorf("keep the text it replaces: %w", err)
+			}
+		}
 		return install(obj.File, ck.files[obj.File.To])
 	case "group":
 		g := *obj.Group

@@ -143,6 +143,15 @@ func (p *Plan) stageFlow(path string) (flow string, ok bool) {
 	return flow, true
 }
 
+// StageFile says op writes the file of a stage of one of the pack's flows: the
+// plan marks it with the store flow and the stage (files), which are what
+// store.KeepStageFile names the file by. It is not told from the path, as
+// stageFlow does, which takes no file of a stage whose name holds a slash
+// (qa/smoke) for one, since that file stands a directory deeper. A file of the
+// flow's directory that the pack does not carry (otherFiles) has a flow and no
+// stage.
+func (op *FileOp) StageFile() bool { return op.Flow != "" && op.Stage != "" }
+
 // Removable reports whether path is one a prune may remove: a file under
 // the pack's own directory in the home, or a stage file of one of its
 // flows. The record says which files an import brought; this says where an
