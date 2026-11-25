@@ -596,7 +596,7 @@ func (h *Herdr) trainBranch(ctx context.Context, job dispatch.Job) error {
 // environment gets that entry beside them (modelEnv), rendered with the
 // session's model. hookEnv is that last part, ensured by Start
 // before the runner creates a worktree, so an installation error starts no
-// work.
+// work. Its git opens no editor (GIT_EDITOR).
 func (h *Herdr) agentEnvWithHook(job dispatch.Job, name string, hookEnv []string) []string {
 	env := Env(job, name)
 	// The harness kind and the agent model, beside the bead and group Env
@@ -616,6 +616,12 @@ func (h *Herdr) agentEnvWithHook(job dispatch.Job, name string, hookEnv []string
 	// The yard's commit-msg hook, through the environment, so the depot's
 	// shared .git/config is never written (see commitHookEnv).
 	env = append(env, hookEnv...)
+	// A pane has no editor for git to open: the agent's commands run without a
+	// terminal, so `git rebase --continue` (or merge --continue, revert) would
+	// park on one with no output until it is killed. "true" takes the message
+	// git prepared. A command that names its own editor (GIT_EDITOR=... git
+	// ...) still gets it; the env file does not (withEnvFile).
+	env = append(env, "GIT_EDITOR=true")
 	if h.YardBin != "" {
 		env = append(env, config.Env("BIN", h.YardBin)...)
 	}

@@ -2084,8 +2084,10 @@ esac`)}
 		raw, _ := os.ReadFile(log)
 		calls := string(raw)
 		env := envOf(apiCall(t, calls, "tab.create"))
+		// GIT_EDITOR: no editor opens in the tab, so a git rebase --continue
+		// in it ends instead of parking.
 		for k, v := range map[string]string{"YARDR_ACTOR": "yard-13-new", "YARDR_HOME": home, "YARDR_BEAD": "yard-13",
-			"YARDR_SESSION": "s1", "YARDR_BIN": "/bin/yardr"} {
+			"YARDR_SESSION": "s1", "YARDR_BIN": "/bin/yardr", "GIT_EDITOR": "true"} {
 			if env[k] != v {
 				t.Errorf("already_open=%v: tab.create env lacks %s=%s: %v", open, k, v, env)
 			}
@@ -2410,7 +2412,8 @@ func TestHerdrDirDepot(t *testing.T) {
 		t.Fatalf("agent's tab not in the directory: %v", tab)
 	}
 	env := envOf(tab)
-	for k, v := range map[string]string{"YARDR_DEPOT_PATH": dir, "YARDR_DEPOT": "docs", "YARDR_ACTOR": "docs-1-new", "YARDR_HOME": home} {
+	for k, v := range map[string]string{"YARDR_DEPOT_PATH": dir, "YARDR_DEPOT": "docs", "YARDR_ACTOR": "docs-1-new", "YARDR_HOME": home,
+		"GIT_EDITOR": "true"} {
 		if env[k] != v {
 			t.Errorf("tab env lacks %s=%s: %v", k, v, env)
 		}

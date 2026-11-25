@@ -58,8 +58,9 @@ func readCalls(t *testing.T, path string) string {
 // checkEnvStart asserts the env file's entry reached the socket request
 // that opens the pane (paneCall: workspace.create or tab.create) and
 // nothing that went through the herdr binary, where a command line shows
-// in ps; that the identity was not overridden by the file; and that the
-// value shows in neither the handle nor the logs.
+// in ps; that the identity was not overridden by the file; that the pane
+// has no editor for git to open (a crew member's and a bead agent's alike);
+// and that the value shows in neither the handle nor the logs.
 func checkEnvStart(t *testing.T, calls, paneCall, actor string, handle map[string]any, logs string) {
 	t.Helper()
 	env := envOf(apiCall(t, calls, paneCall))
@@ -68,6 +69,9 @@ func checkEnvStart(t *testing.T, calls, paneCall, actor string, handle map[strin
 	}
 	if env["YARDR_ACTOR"] != actor {
 		t.Errorf("env file overrode the identity: %v", env)
+	}
+	if env["GIT_EDITOR"] != "true" {
+		t.Errorf("%s lacks GIT_EDITOR=true, so a git rebase --continue in it parks on an editor: %v", paneCall, env)
 	}
 	if cli := cliCalls(calls); strings.Contains(cli, "--env") || strings.Contains(cli, envSecret) || strings.Contains(cli, "LINEAR_API_KEY") {
 		t.Errorf("the pane environment went on a command line:\n%s", cli)

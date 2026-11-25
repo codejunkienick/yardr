@@ -796,8 +796,10 @@ yardr crew show yardmaster     # env_file …/yardmaster.env (LINEAR_API_KEY)
   `env_file` path is the daemon user's home; a variable is not expanded
   there, so a yard with its own `YARDR_HOME` writes the path out.
 - Each entry joins the pane environment next to `YARDR_CREW`,
-  `YARDR_ACTOR` and `YARDR_HOME`. A key yardr sets itself is ignored, so a
-  credentials file cannot change who the agent is.
+  `YARDR_ACTOR`, `YARDR_HOME` and `GIT_EDITOR=true` (no editor opens in a
+  pane, so a `git rebase --continue` takes the message git prepared). A key
+  yardr sets itself is ignored, so a credentials file cannot change who the
+  agent is.
 - The environment reaches herdr over its API socket, in the request that
   opens the pane, never as arguments of a `herdr` command: a command line
   shows in `ps` to every user of the machine, the socket only to its owner.

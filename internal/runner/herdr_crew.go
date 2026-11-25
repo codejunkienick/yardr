@@ -200,6 +200,10 @@ func (h *Herdr) StartCrew(ctx context.Context, r store.CrewMember, user string) 
 	// with an environment entry (Kimi 2.2.0). Blank it when trust is
 	// disabled, so an inherited value or env_file cannot bypass the choice.
 	env = append(env, agents.TrustEnv(kind, r.Config["trust"] != false)...)
+	// As for a bead's agent, a pane has no editor for git to open, so
+	// `git rebase --continue` would park on one (agentEnvWithHook); env_file
+	// cannot set it in its place (withEnvFile).
+	env = append(env, "GIT_EDITOR=true")
 	if user != "" {
 		// How the session's commands read their slice: prime, inbox and
 		// the rest resolve the session from it.
