@@ -183,9 +183,10 @@ it lists every exported name with its comment, faster than grepping.
 
 ## Conventions
 
-- Comments explain why, in full sentences, beside the code they justify;
-  names match their neighbours. Prefer extending what is there over a new
-  concept, flag or special case.
+- Comments explain why, in full sentences, beside the code they justify,
+  never as a retelling of the code or a history of it (what it used to do,
+  which bead changed it); names match their neighbours. Prefer extending what
+  is there over a new concept, flag or special case.
 - Errors are lowercase prose built with `fmt.Errorf`, context outside and
   `%w` inside; expected cases are sentinels (`ErrNotFound`) that callers
   match with `errors.Is`.

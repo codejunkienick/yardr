@@ -428,6 +428,47 @@ func TestBuilderRolesStateTheChangeSize(t *testing.T) {
 	}
 }
 
+// A builder reads each bead's code, so the rules give narrow bounds for
+// what they may change and report.
+func TestBuilderRolesLetABuilderFileWhatCouldBeSimpler(t *testing.T) {
+	files := packFiles(t)
+	const (
+		gitStep = "Make the change in the style of the surrounding code"
+		cut     = "In a file your bead changes anyway, leave the lines you touch simpler: remove a comment that only retells the code beside it, or that tells history (what the code used to do, which bead changed it). A comment that says why stays. No comment is cut in a file or a function your bead does not otherwise change."
+	)
+	for _, tc := range []struct{ name, step, notFixed string }{
+		{"starter/roles/builder.md", gitStep, "on your branch"},
+		{"contributors/roles/builder.md", gitStep, "on your branch"},
+		{"design/roles/builder.md", gitStep, "on your branch"},
+		{"website/roles/builder.md", gitStep, "on your branch"},
+		{"dir/roles/builder.md", "Touch only the files and folders your bead names", "under your bead"},
+	} {
+		body := strings.Join(strings.Fields(files[tc.name]), " ")
+		section := strings.Index(body, "## Something outside your bead")
+		if section < 0 {
+			t.Errorf("%s has no section on what is outside the bead", tc.name)
+			continue
+		}
+		// The comment rule belongs among the change steps, so a builder sees
+		// its scope before the separate section for work outside the bead.
+		if step, rule := strings.Index(body, tc.step), strings.Index(body, cut); step < 0 || rule < step || rule > section {
+			t.Errorf("%s: the comment rule is not in the step that begins %q (step at %d, rule at %d, section at %d)", tc.name, tc.step, step, rule, section)
+		}
+		for _, want := range []string{
+			"It could be simpler (a fallback nothing reaches, two things that do one job): you may file it, as under 1 with `--label simpler` as well, and carry on, never fixing it " + tc.notFixed + ".",
+			"File at most one such bead in a session, the one worth most.",
+			"Its title names what goes or what is joined (\"Remove the fallback to X in Y\", \"Join A and B, which both do Z\"), not \"Refactor Y\".",
+			"Its body says where (the file and the symbol), what is there twice or is not needed, what a person or a caller would notice if it went (a command, a flag, a setting, a printed line, a stored field), and how you know (the search and its output).",
+			"A new helper or abstraction, a rename, code moved between files and fewer lines for their own sake are not worth a bead.",
+			"The test: after the change, is there one thing less a reader must know? If the answer is \"the same things, arranged otherwise\", do not file it.",
+		} {
+			if !strings.Contains(body[section:], want) {
+				t.Errorf("%s: its section on what is outside the bead lacks %q", tc.name, want)
+			}
+		}
+	}
+}
+
 // A pack's stage file's one line on the map of the flow (yardr prime
 // --bead, the brief) is its `summary:` line, else its first sentence, and
 // the map cuts it at store.SummaryMax characters. Most pack summaries fit

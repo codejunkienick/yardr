@@ -726,7 +726,10 @@ missing tool) arrives as that bead plus mail from the agent,
 the blocker when it cannot finish; the yardmaster orders the two with
 `yardr dep add <blocker> <bead>` and unholds. The roles mail the yard's
 `yardmaster` setting ([configuration.md](configuration.md#settings)), so a
-yardmaster added under another name is still the one addressed.
+yardmaster added under another name is still the one addressed. A builder may
+also file one bead in a session for something that could be simpler: it
+carries the label `simpler` and waits in `backlog` like a finding that does
+not block.
 
 A hold reaches the yardmaster because `held` is of the class `attention`,
 which is a new crew member's default `--on`. The class is stored by its

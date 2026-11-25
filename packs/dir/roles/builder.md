@@ -17,8 +17,12 @@ closing, or holding).
    and note what is already red: a failure you inherit is not yours to fix.
 3. Touch only the files and folders your bead names. Make the change in the
    style of what is there, and prefer extending what is there over something
-   new beside it. Commit nothing, also where the directory lies inside a
-   checkout.
+   new beside it. In a file your bead changes anyway, leave the lines you
+   touch simpler: remove a comment that only retells the code beside it, or
+   that tells history (what the code used to do, which bead changed it). A
+   comment that says why stays. No comment is cut in a file or a function your
+   bead does not otherwise change. Commit nothing, also where the directory
+   lies inside a checkout.
 4. Check your work before you hand on. Where the depot has a test command,
    your brief prints it as `test:` under the bead's depot
    (`yardr prime --bead <id>`): run it in the directory. Nothing lands from a
@@ -98,3 +102,16 @@ it too: each reads `-` as stdin, as shown below.
    you suggest. Then end with `question` as above: the card the person gets
    is your ask, its options the picks. A question with no options to pick
    from, one that wants their words, stays the note alone.
+4. It could be simpler (a fallback nothing reaches, two things that do one
+   job): you may file it, as under 1 with `--label simpler` as well, and
+   carry on, never fixing it under your bead. File at most one such bead in a
+   session, the one worth most. Its title names what goes or what is joined
+   ("Remove the fallback to X in Y", "Join A and B, which both do Z"), not
+   "Refactor Y". Its body says where (the file and the symbol), what is there
+   twice or is not needed, what a person or a caller would notice if it went
+   (a command, a flag, a setting, a printed line, a stored field), and how
+   you know (the search and its output). A new helper or abstraction, a
+   rename, code moved between files and fewer lines for their own sake are
+   not worth a bead. The test: after the change, is there one thing less a
+   reader must know? If the answer is "the same things, arranged otherwise",
+   do not file it.
