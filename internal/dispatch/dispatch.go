@@ -297,6 +297,9 @@ type Dispatcher struct {
 	sidingDue *time.Time
 	// gocache is the removal of rotated GOCACHE directories (gocache.go).
 	gocache gocacheKeeping
+	// forgetting is the yard's making a harness forget the sessions it
+	// started once they are old (forget.go).
+	forgetting forgetKeeping
 
 	// lookDue is when the dispatcher next has work due, as of the last pass;
 	// nil when nothing needs a pass before the regular interval.
@@ -927,6 +930,9 @@ func (d *Dispatcher) Reconcile(ctx context.Context) error {
 	if err := d.cleanup(ctx, byName); err != nil {
 		return err
 	}
+	// Once an hour, on a goroutine of its own: a harness takes its time.
+	pass.step("forget")
+	d.forgetSessions(ctx, byName)
 	// Before the crew, so one a timer is for is nudged in this pass.
 	pass.step("timers")
 	d.timers(ctx)
@@ -1080,34 +1086,6 @@ func (d *Dispatcher) forget(id string) {
 	delete(d.dialogs, id)
 	delete(d.nudged, id)
 	delete(d.unsent, id)
-}
-
-// cleanup removes what runners left behind for beads that are now closed,
-// unless the group sets cleanup=false.
-func (d *Dispatcher) cleanup(ctx context.Context, groups map[string]store.Group) error {
-	done, err := d.Store.ClosedWithWorkspace(ctx)
-	if err != nil {
-		return err
-	}
-	for _, s := range done {
-		g := groups[s.Group]
-		if f, ok := d.runnerFor(s, groups).(Finisher); ok && g.Config["cleanup"] != false {
-			if err := f.Finish(ctx, s.Handle); errors.Is(err, ErrNothingLeft) {
-				// another stage's session already handled it
-			} else if err != nil {
-				d.Log.Warn("workspace kept", "bead", s.Bead, "session", s.ID, "err", err)
-				_ = d.Store.LogDispatch(ctx, s.Bead, "workspace_kept", actor, map[string]any{
-					"session": s.ID, "worktree": s.Handle["worktree"], "reason": err.Error()})
-			} else {
-				_ = d.Store.LogDispatch(ctx, s.Bead, "workspace_removed", actor, map[string]any{
-					"session": s.ID, "worktree": s.Handle["worktree"]})
-			}
-		}
-		if err := d.Store.MarkCleaned(ctx, s.ID); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func (d *Dispatcher) route(ctx context.Context, groups map[string]store.Group, active map[string]int, paused bool) error {

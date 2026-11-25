@@ -1819,9 +1819,9 @@ const (
 // is read.
 const KeptGrace = 2 * time.Minute
 
-// usageKey is the key of a session's handle that holds what its agent used,
-// as RecordUsage was given it.
-const usageKey = "usage"
+// HandleUsage is the key of a session's handle that holds what its agent used,
+// as RecordUsage was given it; a session that has it is counted (Uncounted).
+const HandleUsage = "usage"
 
 // The bounds of a snooze, so a stuck agent cannot hide behind one: how
 // long one waits, and how many in a row without the pane changing.
@@ -2413,7 +2413,7 @@ func (s *Store) RecordUsage(ctx context.Context, sessionID string, usage map[str
 		return err
 	}
 	return s.changeSession(sessionID, func(w *wtx, sess *Session) error {
-		if _, counted := sess.Handle[usageKey]; counted {
+		if _, counted := sess.Handle[HandleUsage]; counted {
 			return nil
 		}
 		if len(usage) == 0 {
@@ -2422,7 +2422,7 @@ func (s *Store) RecordUsage(ctx context.Context, sessionID string, usage map[str
 		if sess.Handle == nil {
 			sess.Handle = map[string]any{}
 		}
-		sess.Handle[usageKey] = usage
+		sess.Handle[HandleUsage] = usage
 		delete(sess.Handle, CountDue)
 		return w.event(sess.Bead, "session_usage", "yard", map[string]any{
 			"session": sessionID, "group": sess.Group, "stage": sess.Stage, "kind": sess.Kind, "usage": usage,

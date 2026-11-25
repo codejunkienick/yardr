@@ -244,6 +244,23 @@ func SetEarlyOf(d *Dispatcher, earlyOf func(olds []store.GOCACHEDir, at time.Tim
 	d.gocache.earlyOf = earlyOf
 }
 
+// WaitForgetIdle waits for the run that makes harnesses forget old sessions in
+// flight, if there is one, to end: a pass run alone starts it and does not wait.
+// It gives up after WaitFuse, leaving the test's own assertions to say what did
+// not land.
+func WaitForgetIdle(d *Dispatcher) {
+	d.forgetting.mu.Lock()
+	done := d.forgetting.done
+	d.forgetting.mu.Unlock()
+	if done == nil {
+		return
+	}
+	select {
+	case <-done:
+	case <-time.After(WaitFuse):
+	}
+}
+
 // WaitGOCACHE waits for the sweep of rotated GOCACHE directories in flight,
 // if there is one, to end: a pass run alone starts it and does not wait. It
 // gives up after WaitFuse, leaving the test's own assertions to say what did

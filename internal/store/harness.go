@@ -59,7 +59,13 @@ type Harness struct {
 	// reading, so a harness's own total can come first and a sum of its
 	// lines after it as a fallback. nil when the file names none, and the
 	// kind's sessions are not counted.
-	Usage  []UsageSource `yaml:"usage" json:"usage,omitempty"`
+	Usage []UsageSource `yaml:"usage" json:"usage,omitempty"`
+	// Forget is how the yard makes the harness forget a session it started,
+	// some days after the session ended and its tokens were counted: the
+	// kind's own program, with the arguments the file names. nil when the file
+	// names none, and the harness keeps its record of a session for as long as
+	// it likes.
+	Forget *ForgetSource `yaml:"forget" json:"forget,omitempty"`
 	Errors []ErrorLine   `yaml:"errors" json:"errors,omitempty"`
 	// Dialogs are the questions the harness is known to draw in place of
 	// its input, which yardr tells of and never answers.
@@ -834,6 +840,9 @@ func (h *Harness) Check() error {
 		if err := u.check(); err != nil {
 			return fmt.Errorf("usage: entry %d: %w", i+1, err)
 		}
+	}
+	if err := h.Forget.check(); err != nil {
+		return err
 	}
 	if h.Model != nil && h.Model.Workspace != nil {
 		w := h.Model.Workspace

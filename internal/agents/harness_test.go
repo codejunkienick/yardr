@@ -37,6 +37,14 @@ func TestHarnessFiles(t *testing.T) {
 		if h.Flags.Model != wantModel {
 			t.Errorf("%s model flag %q, want %q", h.Kind, h.Flags.Model, wantModel)
 		}
+		if named := h.Forget != nil; named != (h.Kind == "codex") {
+			t.Errorf("%s: names a forget = %v; only codex does yet", h.Kind, named)
+		}
+		if h.Kind == "codex" && h.Forget != nil {
+			if want := []string{"delete", "--force", "{session}"}; h.Forget.AfterDays != 7 || !slices.Equal(h.Forget.Args, want) {
+				t.Errorf("codex forget = %+v, want 7 days and %q", *h.Forget, want)
+			}
+		}
 		// opencode takes its model in its environment instead; no other
 		// kind names one today.
 		if h.Kind == "opencode" {
@@ -755,6 +763,12 @@ func TestLoadRefuses(t *testing.T) {
 		"workspace, a field not known":        {"claude.yaml", "version: 1\nlabel: x\nmodel: {home: .x, glob: 's/{session}/f.jsonl', field: m, workspace: {field: f, at: t, when: x}}\n", "field when not found"},
 		"workspace, {session} inside a word":  {"claude.yaml", "version: 1\nlabel: x\nmodel: {home: .x, glob: '{session}.jsonl', field: m, workspace: {field: f, at: t}}\n", "workspace: glob"},
 		"workspace, {session} twice":          {"claude.yaml", "version: 1\nlabel: x\nmodel: {home: .x, glob: 's/{session}/{session}/f.jsonl', field: m, workspace: {field: f, at: t}}\n", "workspace: glob"},
+		"forget, no days":                     {"claude.yaml", "version: 1\nlabel: x\nforget: {args: [delete, '{session}']}\n", "forget.after_days: 0 is not"},
+		"forget, no arguments":                {"claude.yaml", "version: 1\nlabel: x\nforget: {after_days: 7}\n", "forget.args: the arguments"},
+		"forget, no id":                       {"claude.yaml", "version: 1\nlabel: x\nforget: {after_days: 7, args: [delete, --force]}\n", "forget.args: 0 words are {session}"},
+		"forget, the id twice":                {"claude.yaml", "version: 1\nlabel: x\nforget: {after_days: 7, args: [delete, '{session}', '{session}']}\n", "forget.args: 2 words are {session}"},
+		"forget, the id inside a word":        {"claude.yaml", "version: 1\nlabel: x\nforget: {after_days: 7, args: [delete, '--id={session}']}\n", `forget.args: "--id={session}" holds braces`},
+		"forget, no program to name":          {"claude.yaml", "version: 1\nlabel: x\nforget: {after_days: 7, args: [delete, '{session}'], program: rm}\n", "field program not found"},
 	} {
 		if _, err := load(t, map[string]string{c.file: c.body}); err == nil || !strings.Contains(err.Error(), c.want) || !strings.Contains(err.Error(), c.file) {
 			t.Errorf("%s: %v, want %q and the file's name", name, err, c.want)

@@ -2170,7 +2170,7 @@ internal/cli/routereport.go 1513 the route report and its rendering
 internal/cli/sourcecmd.go 2088 the source command and its builtin checks
 internal/cli/subscriptions.go 1148 the identity, subscribe and thread commands
 internal/cli/updown.go 1302 yard up and down with their handoffs
-internal/dispatch/dispatch.go 1501 the daemon routing pass and its runners
+internal/dispatch/dispatch.go 1479 the daemon routing pass and its runners
 internal/dispatch/harnesslogin.go 1094 harness login leading and onboarding marks
 internal/pack/export.go 1047 pack export and its object shapes
 internal/pack/pack.go 1776 pack reading, checking and its shapes

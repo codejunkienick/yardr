@@ -205,7 +205,7 @@ func TestSlowPassNamesTheStepsItsTimeWentTo(t *testing.T) {
 	// Every step is named, in the order the pass runs them.
 	at := 0
 	for _, step := range []string{"stamp_limits_clock", "nudge_limits_refresher", "drain_starts", "drain_crew_starts",
-		"begin_home", "pane_cache", "groups", "reap", "usage", "teardown", "cleanup", "timers", "pass_lists",
+		"begin_home", "pane_cache", "groups", "reap", "usage", "teardown", "cleanup", "forget", "timers", "pass_lists",
 		"waits", "sidings", "quiet_hooks", "gate", "crew", "rules", "ci", "issues", "pushes", "bases", "route",
 		"settle_starts", "settle_crew_starts", "backups", "gocache", "telemetry", "peers", "fetches", "end_home", "stamp"} {
 		i := strings.Index(lines[0][at:], " "+step+"=")

@@ -64,7 +64,10 @@ func TestHarnessListAndShow(t *testing.T) {
 		"Tokens a session used, counted once it has stopped\n  ~/.codex (or $CODEX_HOME)/sessions/*/*/*/rollout-*-{session}.jsonl\n",
 		"  1. the last line whose payload.type is token_count that has numbers at payload.info.total_token_usage\n",
 		"     counts: input input_tokens (includes the cache read), output output_tokens, cache read cached_input_tokens, cache write cache_write_input_tokens\n",
-		"     time:   from timestamp, RFC 3339 when a string or Unix time in seconds\n")
+		"     time:   from timestamp, RFC 3339 when a string or Unix time in seconds\n",
+		"Forgetting a session the yard started, so that the harness does not keep it for ever\n"+
+			"  7 days after it ended, once it has stopped and its tokens are counted: codex delete --force {session}\n"+
+			"  ({session} is the id the agent's session had; a person's own sessions, a session left running (keep) and a manual, peer or exec group's are never forgotten)\n")
 	wantText(t, ask(0, "harness", "show", "kimi"), "trust: yardr answers its folder-trust dialog",
 		"trust environment (automatic only): KIMI_CODE_TRUST_WORKSPACE",
 		"after the box's edge: │", "a message it took:    ✨",
@@ -81,6 +84,11 @@ func TestHarnessListAndShow(t *testing.T) {
 	if out := ask(0, "harness", "show", "kimi"); strings.Contains(out, "The context its agent holds") ||
 		strings.Contains(out, "Tokens a session used") || strings.Contains(out, "First-start screens") {
 		t.Errorf("show kimi lists a context use, a token count or first-start screens, and its file has none:\n%s", out)
+	}
+	for _, kind := range []string{"kimi", "claude", "muse"} {
+		if out := ask(0, "harness", "show", kind); strings.Contains(out, "Forgetting a session") {
+			t.Errorf("show %s lists a forget, and its file names none:\n%s", kind, out)
+		}
 	}
 	wantText(t, ask(0, "harness", "show", "claude"), "trust: yardr answers its folder-trust dialog",
 		"Login screen, drawn in place of its input: told of at once (nudge_held), never typed into",
@@ -205,7 +213,7 @@ func TestHarnessListAndShow(t *testing.T) {
 		"usage": "Tokens a session used", "errors": "Error lines it stops on", "dialogs": "Dialogs it draws",
 		"login": "Login screen", "login_recipe": "Login led by a program", "login_env": "API key it runs with",
 		"api_key": "Use-this-API-key dialog", "onboarding": "First-start screens", "background": "Background work",
-		"hints": "What it adds to a hint",
+		"hints": "What it adds to a hint", "forget": "Forgetting a session the yard started",
 	}
 	for _, h := range agents.Harnesses {
 		var keys map[string]json.RawMessage
@@ -250,6 +258,12 @@ func TestHarnessListAndShow(t *testing.T) {
 			"     time:   from at, RFC 3339 when a string or Unix time in seconds\n",
 		"First-start screens, drawn before its input is up: yardr answers each once, in turn\n"+
 			`  "Pick one": the cursor > is moved onto "Yes" or "Sure", then Enter`+"\n")
+
+	// One day is one day, and a file with a forget prints it whatever else it has.
+	h.Forget = &store.ForgetSource{AfterDays: 1, Args: []string{"forget", "{session}"}}
+	synthetic.Reset()
+	printHarness(&synthetic, h, true)
+	wantText(t, synthetic.String(), "  1 day after it ended, once it has stopped and its tokens are counted: synthetic forget {session}\n")
 
 	// A file with none of the three prints none of their headings.
 	h.Context, h.Usage, h.Onboarding = nil, nil, nil

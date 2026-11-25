@@ -343,6 +343,15 @@ func printHarness(w io.Writer, h store.Harness, has bool) {
 			fmt.Fprintf(w, "  %d. %s\n     counts: %s\n     time:   %s\n", i+1, lines, counts, at)
 		}
 	}
+	if f := h.Forget; f != nil {
+		days := fmt.Sprintf("%d days", f.AfterDays)
+		if f.AfterDays == 1 {
+			days = "1 day"
+		}
+		fmt.Fprintln(w, "\nForgetting a session the yard started, so that the harness does not keep it for ever")
+		fmt.Fprintf(w, "  %s after it ended, once it has stopped and its tokens are counted: %s %s\n", days, store.Executable(h.Kind), strings.Join(f.Args, " "))
+		fmt.Fprintln(w, "  ({session} is the id the agent's session had; a person's own sessions, a session left running (keep) and a manual, peer or exec group's are never forgotten)")
+	}
 	fmt.Fprintln(w, "\nError lines it stops on, in the order they are tried")
 	if len(h.Errors) == 0 {
 		fmt.Fprintln(w, "  none known: nothing is reported, and session_idle with its tail is what there is")

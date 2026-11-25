@@ -1070,6 +1070,46 @@ neither has an agent or a file, so neither is counted. Nor is a session that was
 stopped before the daemon began to count. A crew member's sessions are counted
 too, to the crew member ([crew.md](crew.md#what-a-crew-session-used)).
 
+### What happens to a session's record afterwards
+
+A harness keeps a record of every session it ran, and some keep a lot: Codex
+keeps each thread's history in a database of its own, which removing the
+session's file leaves behind. A kind's file can say how the yard makes the
+harness forget a session it started, and after how many days (`forget`, in
+[what yardr knows of a kind](#what-yardr-knows-of-a-kind)). Codex's does: 7 days
+after the session ended, `codex delete --force <id>`, where `--force` is what
+lets it run with no terminal to ask on. No other kind's file names one.
+
+Once a herdr session has ended, is stopped and its tokens are counted (its
+handle has `usage`), and the days have passed, the daemon runs the kind's own
+program with the arguments the file names, putting the id it kept on the handle
+as `agent_session` where `{session}` stands, with nothing typed to it. It looks
+once an hour and does the work in the background, one session at a time, the one
+that ended longest ago first: a yard that has run for weeks finds thousands at
+its first look, and the rest of the pass does not wait for them. A run stops,
+and the rest wait for the next look, where the fault is not a session's: the
+harness's program is not found (it is not on the daemon's `PATH`), which is no
+try of the session's, or five tries in a row fail.
+
+A session that was dealt with has `forgotten` on its handle (`yardr session
+list --all --json`): `at`, when, and `missing` where there was nothing to run
+(`no forget`, `no session id`) or the yard gave up. A try that fails is told on
+the bead as `session_forget_failed` (`session`, `kind`, `tries`, and the reason,
+which only the operator is told) and made again at the next look, three tries
+in all, counted as `forget_tries` on the handle. A harness cannot say a session
+it no longer holds from any other failure (Codex answers `failed to delete
+session` to both), so the session is then marked `forgotten` with `missing`
+naming the last error, and no longer tried.
+
+Left alone: a person's own sessions with the harness, since the yard knows the
+ids of the sessions it started and no others; a manual group's session, a peer
+group's and an exec group's, which have no agent of this yard's; a crew
+member's sessions, which are not sessions of the store; a session whose count
+says `kept: true`, since its group's `keep` left the agent running and a person
+may be in its pane; and a session of a kind whose file names no forget. The
+runner is the one the session's own record names, whichever runner its group
+has now.
+
 ### A harness that stopped on an error
 
 `session_stalled` is about a session's first prompt. A harness can stop
@@ -1921,6 +1961,7 @@ built into the binary and read once when yardr starts:
 | `model` | where the model an agent reports is read ([Models](#models)): `home` and `home_env` (the harness's own directory), `glob` (the session file, `{session}` being the id herdr reports, or the segment of the file's path that stands there where herdr names a session by that path, as pi's file name), `type` and `field` (which line, and where in it; `type_field` names the key that holds the type when it is not `type`), and `workspace` (how the file of a session herdr reports no id for is found instead: `type` and `field` name the line that holds the worktree, `at` the line's own time as `usage` reads it; Muse has one) | the daemon |
 | `context` | where the context an agent holds is read, in the session file `model` finds ([Rotation](crew.md#rotation)): `type` (which lines are read, all of them when none is named; `type_field` names the key that holds the type when it is not `type`), `usage` (a path of keys, joined by dots, to the object that holds the numbers) and `tokens` (the fields that add up to what the session holds; `input_tokens`, `cache_read_input_tokens` and `cache_creation_input_tokens` when the file names none). The last line that has numbers at `usage` is the reading. Claude Code, Codex, Muse and pi name one; a kind with none has no context rotation, the failsafe alone | the daemon, for an idle crew member |
 | `usage` | what a whole session used, in tokens, read from the session file `model` finds once the session has ended ([the design](design/2026-10-21-yardr-qbqq-session-tokens.md#33-how-a-harness-file-declares-it-question-3)): a list of entries, tried in order, and the first that finds a line is the reading. An entry names its lines as `context` does, with `type`, `type_field` and `usage` (`type_field` may be a path, and a `*` in `usage` takes every value of a map: Claude Code's `modelUsage.*` adds up every model it called). `read` says which lines count (`last`, the default, takes the last line with numbers; `sum` adds up every line), and `key`, a path to a string, makes `sum` take the last line for each value found there. `at` is the path to the line's own time, a string read as RFC 3339 or a number read as Unix time in the unit `at_unit` names (`s` by default, `ms` or `us`); a count that stops at a time cannot use an entry with no `at`. `input`, `output`, `cache_read` and `cache_write` each name the field that holds that count, and one with no field reads as 0. `cache_in_input` says `input` includes the cache reads, as Codex's and Muse's do, so they come off it to give the fresh input. `partial` says the entry falls short of what the session used, as a fallback does. Claude Code names two entries, Codex and Muse one each; a kind with none has no count | the herdr runner |
+| `forget` | how the yard makes the harness forget a session it started, once the session has ended, is stopped and its tokens are counted ([below](#what-happens-to-a-sessions-record-afterwards)): `after_days`, the whole days after it ended (1 or more), and `args`, the arguments of the kind's own program, with `{session}` as one word of its own, once, where the id of the agent's session goes. The file names no program: what runs is the kind's own, as for `flags.version`, and never through a shell. Codex names one, `delete --force {session}` after 7 days; a kind that names none keeps what it keeps | the daemon |
 | `errors` | the lines it stops on, each a `pattern` and a `reason` ([above](#a-harness-that-stopped-on-an-error)) | the daemon |
 | `dialogs` | the questions it draws in place of its input, each a `pattern` for a line of the question and the word for it, `dialog` (yardr cancels Claude Code's auto mode offer; other dialogs are told of and left for a person; [Kimi](#kimi) and [Claude Code](#claude-code) have one each) | the herdr runner |
 | `login` | the lines of its login screen, drawn in place of its input when it has no login, which yardr types nothing into and tells of as not logged in: each a `pattern` for a line of the screen (Claude Code and Muse have one) | the herdr runner |

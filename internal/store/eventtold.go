@@ -95,6 +95,7 @@ var eventDataTold = map[string][]string{
 	"session_harness_error":    {"crew", "user", "group", "kind", "model", "fallback_model", "prompt_shown", "reason", "resets_at", "session", "stage", "tries", "wakes_at", "window"},
 	"session_harness_retry":    {"crew", "user", "group", "kind", "of", "reason", "session", "stage", "try", "window"},
 	"workspace_kept":           {"session"},
+	"session_forget_failed":    {"kind", "session", "tries"},
 	"workspace_removed":        {"session"},
 	"human_notified":           {"group", "session", "stage"},
 	"nudge_held":               {"crew", "user", "session", "waited"},

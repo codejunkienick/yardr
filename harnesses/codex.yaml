@@ -199,6 +199,28 @@ usage:
     cache_write: cache_write_input_tokens
     output: output_tokens
 
+# How the yard makes Codex forget a session it started: 7 days after the
+# session ended and its tokens were counted, it runs `codex delete` for it. The
+# session's file is not all there is to remove. codex-cli 0.160.1 keeps each
+# thread's history in thread_history_1.sqlite (2.5 GiB for 6,000 threads when
+# read) and indexes it in state_5.sqlite, in the threads table, so a file that
+# is only unlinked leaves the big copy and a row that points at nothing; Codex
+# has no setting that prunes sessions (only its memories and its prompt cache
+# have a retention). Read on 25 Nov 2026, against a private CODEX_HOME made
+# with `codex exec`: `codex delete --force <uuid>` exits 0 and removes the
+# rollout file, the threads row and every thread_history row of the thread,
+# whether the file is still there or was removed by hand, whether Codex's
+# shared app-server daemon runs or not, and starts no daemon. It asks before it
+# deletes, and with no terminal it refuses ("cannot confirm session deletion
+# without an interactive terminal; rerun with --force and a session UUID"), so
+# --force is what makes it run unattended; --force takes a UUID and never a
+# session's name, so a session a person named cannot be matched by it. An id
+# Codex no longer holds exits 1 with "failed to delete session", as any failure
+# does.
+forget:
+  after_days: 7
+  args: [delete, --force, "{session}"]
+
 errors:
   - reason: at_capacity
     pattern: '^(Selected model is at capacity|Flex capacity unavailable)'

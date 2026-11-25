@@ -66,8 +66,10 @@ it lists every exported name with its comment, faster than grepping.
 - `dispatch`: the daemon's pass: wakes on a committed write, re-reads
   state, routes beads, runs the crew, keeps backups, removes rotated
   GOCACHE directories when their grace ends (and inside it, while the disk
-  is under the gate's floor and no go process can hold them), sends the
-  daily telemetry batch when the operator turned it on; never polls.
+  is under the gate's floor and no go process can hold them), has a
+  harness forget a session it started once its file's days have passed,
+  sends the daily telemetry batch when the operator turned it on; never
+  polls.
 - `diskkeep`: keeping the machine's disk free for landings' builds
   (GOCACHE rotation, stale go-tmp), run by `yardr disk keep`; its removal
   of rotated caches past their grace is also the daemon's (`Sweep`), and so
