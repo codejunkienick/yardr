@@ -159,7 +159,7 @@ flow in a depot's repository has them beside it: ` + store.RepoFlowDir + `/<name
 			return st.DeleteFlow(c.Context(), args[0], a.who())
 		},
 	}
-	cmd.AddCommand(set, a.flowSetStageCmd(), show, list, rm)
+	cmd.AddCommand(set, a.flowSetStageCmd(), a.flowCopyCmd(), show, list, rm)
 	return cmd
 }
 

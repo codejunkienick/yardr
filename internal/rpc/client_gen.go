@@ -329,6 +329,9 @@ func (c *Client) PutFlow(ctx context.Context, f store.Flow, actor string) (*stor
 func (c *Client) PutStageFile(ctx context.Context, flow, stage, text, expectDigest, actor string) (*store.StageFile, error) {
 	return callV[*store.StageFile](c, ctx, "PutStageFile", flow, stage, text, expectDigest, actor)
 }
+func (c *Client) CopyRepoFlows(ctx context.Context, depot, actor string) (*store.CopiedFlows, error) {
+	return callV[*store.CopiedFlows](c, ctx, "CopyRepoFlows", depot, actor)
+}
 func (c *Client) ListFlows(ctx context.Context) ([]store.Flow, error) {
 	return callV[[]store.Flow](c, ctx, "ListFlows")
 }

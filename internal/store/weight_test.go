@@ -258,7 +258,7 @@ calls:
 	}
 
 	// Every other row is routine whatever it is asked.
-	weighty := []string{"peer add", "peer set", "peer allow", "source set", "source grant", "source add", "pack apply", "pack install", "hook add", "user key", "user add", "user invite", "user login", "crew add", "group add", "group set", "crew set", "user identity", "depot test", "depot add", "call", "settings set", "hook rm", "user set role", "source move", "user device pair", "flow set", "flow set-stage"}
+	weighty := []string{"peer add", "peer set", "peer allow", "source set", "source grant", "source add", "pack apply", "pack install", "hook add", "user key", "user add", "user invite", "user login", "crew add", "group add", "group set", "crew set", "user identity", "depot test", "depot add", "call", "settings set", "hook rm", "user set role", "source move", "user device pair", "flow set", "flow set-stage", "flow copy-repo"}
 	for _, c := range runList {
 		// The two forms of user set are two rows of one command's words.
 		name := strings.Join(c.words, " ")

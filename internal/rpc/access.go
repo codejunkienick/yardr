@@ -221,6 +221,7 @@ var Access = map[string]Class{
 	"DeleteRoute":    Admin,
 	"PutFlow":        Admin,
 	"PutStageFile":   Admin,
+	"CopyRepoFlows":  Admin,
 	"ListFlows":      Read,
 	"GetFlow":        Read,
 	"DeleteFlow":     Admin,

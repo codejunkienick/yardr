@@ -105,6 +105,10 @@ func TestSocketRefusesABeadsPaneWhatIsNotAnAgents(t *testing.T) {
 			_, err := c.PutStageFile(ctx, "trains", "open", "Skip the review.\n", "", "jo")
 			return err
 		}},
+		{"CopyRepoFlows", func() error {
+			_, err := c.CopyRepoFlows(ctx, "yard", "jo")
+			return err
+		}},
 		{"SetFlowPointer", func() error { return c.SetFlowPointer(ctx, "", "", "trains", "jo") }},
 		{"Backup", func() error {
 			_, err := c.Backup(ctx, filepath.Join(backups, "yard.db"))
@@ -216,6 +220,26 @@ func TestSocketServesACrewPaneTheYardsRouting(t *testing.T) {
 	}
 	if _, err := st.PutStageFile(ctx, "trains", "open", "Work it.\n", "none", "jo"); err != nil {
 		t.Errorf("the operator's own PutStageFile: %v", err)
+	}
+	// So is copying a depot's repository flows into the store, which the
+	// call serves to a crew pane and the store holds to the operator.
+	repo := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(repo, store.RepoFlowDir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, store.RepoFlowDir, "default.flow"), []byte("open -> done\ndone terminal\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	must(st.PutDepot(ctx, store.Depot{Name: "web", Kind: store.DepotDir, Path: repo}, "jo"))
+	if _, err := c.CopyRepoFlows(ctx, "web", "jo"); err == nil ||
+		!strings.Contains(err.Error(), "only the operator (jo) may change a flow's stages; this is yardmaster") {
+		t.Errorf("CopyRepoFlows from a crew pane = %v, want it the operator's alone", err)
+	}
+	if _, err := st.GetFlow(ctx, "web.default"); err == nil {
+		t.Error("the refused CopyRepoFlows stored a flow")
+	}
+	if _, err := st.CopyRepoFlows(ctx, "web", "jo"); err != nil {
+		t.Errorf("the operator's own CopyRepoFlows: %v", err)
 	}
 	if err := c.DeletePeer(ctx, "far", "jo"); err == nil || !strings.HasPrefix(err.Error(), "DeletePeer is the operator's alone") {
 		t.Errorf("DeletePeer from a crew pane = %v, want it the operator's alone", err)

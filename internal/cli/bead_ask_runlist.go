@@ -297,4 +297,18 @@ const askRunList = `  peer add <name> <invite>
       sets the pack's only with --take file/<name>; a flow of a depot's
       repository is refused, naming the file to change on its branch
       (weighty, code)
+  flow copy-repo <depot>
+      the flows of the depot's repository that govern its beads (its
+      default.flow, each type's file, and a named flow a pointer leads
+      to) are copied into the store with their stage files, and the depot
+      and each of those types are pointed at the copies together, so that
+      flow set and flow set-stage can change them: the card names each
+      file and the store flow it becomes, which replaces an unused
+      leftover of an earlier copy, what stays as it is in the store, that
+      the repository's files then stop governing those flows, and the
+      commands that point each pointer back, the depot's first; the
+      approval is held to the repository as the card read it, and a store
+      flow of a copy's name that a pointer or an open bead's pin follows,
+      or that a pack manages, is refused at the ask and again at approval
+      (weighty, code)
 `

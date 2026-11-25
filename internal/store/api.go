@@ -150,6 +150,7 @@ type API interface {
 
 	PutFlow(ctx context.Context, f Flow, actor string) (*Flow, error)
 	PutStageFile(ctx context.Context, flow, stage, text, expectDigest, actor string) (*StageFile, error)
+	CopyRepoFlows(ctx context.Context, depot, actor string) (*CopiedFlows, error)
 	ListFlows(ctx context.Context) ([]Flow, error)
 	GetFlow(ctx context.Context, name string) (*Flow, error)
 	DeleteFlow(ctx context.Context, name, actor string) error

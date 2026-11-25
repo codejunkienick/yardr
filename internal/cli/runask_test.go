@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -886,11 +887,12 @@ func TestRunListIsTheCLIs(t *testing.T) {
 		"yardr depot add <name> --clone <url> [--kind git] [--base <branch>]": {"depot add shed --clone file:///repos/shed.git"},
 		"yardr flow set <name>": {"flow set code"},
 		"yardr flow set-stage <flow> <stage> [--digest <sha256|none>]": {"flow set-stage code review"},
+		"yardr flow copy-repo <depot>":                                 {"flow copy-repo web"},
 		"yardr call <source> <call> [param=value ...] [--as <user>]":   {"call crm note text=a test note"},
-		"yardr hook rm <name>":                                     {"hook rm linear"},
-		"yardr source move <from> <to>":                            {"source move crm linear"},
-		"yardr user device pair <user> <device> [--url <address>]": {"user device pair ada tablet --url https://mac.example.net"},
-		"yardr user set <user> role=operator|member":               {"user set ada role=operator"},
+		"yardr hook rm <name>":                                         {"hook rm linear"},
+		"yardr source move <from> <to>":                                {"source move crm linear"},
+		"yardr user device pair <user> <device> [--url <address>]":     {"user device pair ada tablet --url https://mac.example.net"},
+		"yardr user set <user> role=operator|member":                   {"user set ada role=operator"},
 	}
 	if len(asks) != len(store.RunCommands()) {
 		t.Errorf("this test has asks for %d commands, and the list has %d", len(asks), len(store.RunCommands()))
@@ -1355,6 +1357,63 @@ func TestRunListIsTheCLIs(t *testing.T) {
 					if got, err := os.ReadFile(path); err != nil || string(got) != text {
 						t.Errorf("%s left %q, %v; want %q", who, got, err, text)
 					}
+				}
+				continue
+			}
+			if use == "yardr flow copy-repo <depot>" {
+				ctx := context.Background()
+				// A flow copy-repo card and its terminal command are one store
+				// function, and each yard reads its depot from a directory of
+				// its own, so the row is held to the help its card shows, its
+				// approval, and the flows and pointers the approval left, which
+				// the terminal's command leaves of the same depot as it does.
+				files := map[string]string{
+					"default.flow":    "in -> review\nreview -> done\ndone terminal\n",
+					"default/in.md":   "Say what is wanted.\n",
+					"type/wagon.flow": "wait -> ride\nride -> done\ndone terminal\n",
+				}
+				for _, y := range []*cliYard{approved, typed} {
+					if err := y.st.PutDepot(ctx, store.Depot{Name: "web", Kind: store.DepotDir, Path: copyRepoFiles(t, files)}, "jo"); err != nil {
+						t.Fatal(err)
+					}
+				}
+				seq, err := approved.st.AddAsk(ctx, ab.ID, store.Ask{Question: "Run it?", To: "jo", Context: []string{"why"},
+					Run: &store.AskRun{Argv: []string{command}}}, "yardmaster")
+				if err != nil {
+					t.Fatalf("%s: %v", use, err)
+				}
+				notes, err := approved.st.Notes(ctx, ab.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var description string
+				for _, asked := range store.ResolveAsks(notes, time.Now()) {
+					if asked.Note.Seq == seq && asked.Ask.Run != nil {
+						description = asked.Ask.Run.Description
+					}
+				}
+				twin, _, err := (&app{}).flowCmd().Find([]string{"copy-repo"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if description != twin.Short {
+					t.Errorf("%s card description %q, want the terminal command's %q", use, description, twin.Short)
+				}
+				done, err := approved.st.ApproveAsk(ctx, ab.ID, seq, "jo", true, nil)
+				if want := "depot web: copied 2 flows from repo (directory) into the store: web.default, web.wagon"; err != nil || done.Result != want {
+					t.Fatalf("%s approval = %+v, %v; want %q", use, done, err, want)
+				}
+				if _, err := run(t, typed.a.flowCmd(), "copy-repo", "web"); err != nil {
+					t.Fatalf("%s at a terminal: %v", use, err)
+				}
+				var left [2][]store.FlowPointer
+				for i, y := range []*cliYard{approved, typed} {
+					if left[i], err = y.st.FlowPointers(ctx); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if !reflect.DeepEqual(left[0], left[1]) || len(left[0]) != 2 {
+					t.Errorf("%s: the approval left the pointers %+v and the terminal %+v", use, left[0], left[1])
 				}
 				continue
 			}

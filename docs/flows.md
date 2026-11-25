@@ -140,6 +140,88 @@ A file that does not parse is shown by `yardr flow list` with its error;
 a bead it would govern cannot be created or moved until the base is fixed,
 rather than silently running without its flow.
 
+## Copying a repository's flows into the store
+
+A flow in a depot's repository is changed on a branch and landed, and `yardr
+flow set` and `yardr flow set-stage` change the store's flows only. To edit
+the flows of a depot, and what their stages say, in the yard, copy them there
+when you choose to, with one command:
+
+```sh
+yardr flow copy-repo yardr
+```
+
+```
+copied the flows of depot yardr into the store, from repo@3f2a1c9:
+  .yardr/flows/default.flow -> yardr.default (7 stage files)
+  .yardr/flows/yardr.train.flow -> yardr.train.local (4 stage files)
+to point back at the repository, in this order:
+  yardr depot source yardr flow depot
+  yardr depot flow yardr --type train yardr.train
+```
+
+The command copies **every flow that governs the depot from its repository**:
+`default.flow`, each `type/<type>.flow`, and each named flow that a pointer of
+the depot or of a type leads to (depot yardr's `train` beads follow
+`yardr.train`, a file of its repository). A flow that governs from the store
+already stays as it is, and the output names it (`left as they are, in the
+store already`). A file that does not govern, such as a named flow that only a
+bead's pin names, or a type's file that a pointer of the depot stands in
+front of, is not copied. A depot with nothing to copy is refused, naming what
+it has, and so is one whose governing file does not parse.
+
+- **The names.** A flow is copied as `<depot>.default` or `<depot>.<type>`,
+  and with `.local` after the name where the repository has a flow of that
+  name (`yardr.train` above): the store is looked up before the repository, so
+  a copy under the repository flow's own name would stand in front of it for
+  every pointer and pin that names it, and pointing back would lead to the copy.
+- **The stage files.** The repository's stage files of each flow, the ones with
+  something in them, are written to `<home>/flows/<flow>/<stage>.md` at
+  `rw-r--r--`, as `flow set-stage` writes them: whole, never through a symbolic
+  link, and left alone where the file already holds the text.
+- **All at once.** The flows are saved and the depot and each of those types
+  are pointed at the copies in one write, since a pointer of the depot stands
+  in front of the repository's type files (`Which flow governs a bead`): a depot
+  pointed at its copy of `default.flow` alone would stop reading the type
+  files it has not copied. Beads store no flow name unless a pin names one, so
+  they follow the copies and nothing moves; the copy is refused, naming the
+  beads, if one that is open sits in a stage its flow lacks, as pointing a
+  depot at a flow is.
+- **After it.** The repository's files no longer govern those flows while the
+  copies stand: a change that lands in `.yardr/flows/` is not read for them,
+  and the copies change in the yard only. `yardr depot sources <depot>` shows
+  where each flow and stage comes from.
+- **Pointing back.** The commands the output prints point each pointer at the
+  repository again, the depot's before the types' (the depot's pointer stands in
+  front of their files), and leave the copy in the store and its stage files in
+  the home, unused. A pointer that led to a named repository flow is pointed at
+  that flow, not cleared.
+- **Copying again.** A store flow of a copy's name that nothing follows is an
+  earlier copy that was pointed back, and is replaced: the flow as the
+  repository has it now, its stage files written over, and the files of the old
+  copy that the new one has no file for removed (a file that is no markdown is
+  left). The output says `replacing an unused earlier copy`. One that a pointer
+  of any depot or type, or an open bead's pin, follows, or that a pack manages,
+  is not replaced: the whole copy is refused, naming who follows it, and
+  nothing is written, in the store or on disk.
+
+Only the operator copies, as only the operator writes a stage file (`flow
+set-stage`): the store refuses a crew member or a user, who propose it as a
+card instead, which the operator approves: `yardr bead ask <id> -`, with `R:
+flow copy-repo <depot>` on stdin. The card is weighty `code`, always. It shows
+each file and the store flow it becomes, with its stage files and, for a
+pointer, the flow it led to; which copy replaces an unused earlier one and
+removes its files; the flows that stay as they are; that the repository's files
+stop governing; and the commands that point each pointer back, which only the
+operator runs. The approval is held to the repository as the card read it (the
+base commit, or a dir depot's files), to the depot's pointers and to the
+targets as they stood: a commit that landed, a pointer set or a leftover copy
+that appeared since is refused as stale, and a store flow of a copy's name that
+a depot, a type or a pin follows since is refused in the card's own words, with
+nothing written. The copy is recorded as `flow_set` for each flow and
+`flow_pointer_set` for each pointer, and `--json` prints the store's answer
+(`depot`, `source`, `flows`, `kept`) alone.
+
 ## A base change that drops a stage
 
 A commit on the base branch that removes a stage from a repository flow
@@ -557,7 +639,9 @@ A flow in a depot's repository has its stage files in the repository, so
 `flow set-stage` refuses it, naming the path to change there:
 `.yardr/flows/<flow>/<stage>.md` for a flow, and
 `.yardr/flows/type/<type>/<stage>.md` for a type's, edited on a branch and
-committed. Nothing here writes a branch or a commit.
+committed. Nothing here writes a branch or a commit. To edit a repository
+flow's stage files in the yard instead, copy the flow into the store first
+([Copying a repository's flows into the store](#copying-a-repositorys-flows-into-the-store)).
 
 A crew member or a user proposes the same change as a card, which the
 operator approves: `yardr bead ask <id> - --run-flow <file>`, with the command
