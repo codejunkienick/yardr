@@ -96,6 +96,47 @@ func TestStageWriteInTheClear(t *testing.T) {
 	}
 }
 
+// A refusal that gives its fix after "or" reads on from it, so the fix starts
+// in lower case: "..., or read it on the yard's machine." The two refusals that
+// do are the one for a request from another machine and the one for a request
+// behind a proxy that says plain. The refusal down the link has no "or" and
+// says the same words as a sentence of its own, where they keep their capital;
+// the grant list and the telemetry preview have such a refusal, which makes
+// each of them a constant used both ways.
+func TestRefusalsGiveTheFixAfterOrInLowerCase(t *testing.T) {
+	const here = "read it on the yard's machine"
+	for _, call := range []struct{ name, fix string }{
+		{"Teammates", here + "."},
+		{"SourceGrants", here + " (`yardr source grants`)."},
+		{"SessionScreen", here + "."},
+		{"Line", here + "."},
+		{"TelemetryShow", here + " (`yardr telemetry show`)."},
+	} {
+		for _, c := range []struct{ name, remote, proto string }{
+			{"from another machine", "203.0.113.9:40000", ""},
+			{"behind a proxy that says plain", "127.0.0.1:40000", "http"},
+		} {
+			t.Run(call.name+"/"+c.name, func(t *testing.T) {
+				got := inTheClear(clearRequest(c.remote, c.proto), call.name, "", false, false, false)
+				if want := ", or " + call.fix; !strings.Contains(got, want) {
+					t.Errorf("the refusal is %q, want it to say %q", got, want)
+				}
+			})
+		}
+	}
+	for _, call := range []struct{ name, sentence string }{
+		{"SourceGrants", "Read it on the yard's machine (`yardr source grants`)."},
+		{"TelemetryShow", "Read it on the yard's machine (`yardr telemetry show`)."},
+	} {
+		t.Run(call.name+"/down the link", func(t *testing.T) {
+			got := inTheClear(clearRequest(linkRemoteAddr, ""), call.name, "", false, false, false)
+			if want := "from the edge. " + call.sentence; !strings.Contains(got, want) {
+				t.Errorf("the refusal is %q, want it to say %q", got, want)
+			}
+		})
+	}
+}
+
 // operatorInTheClear is inTheClear for every call of OperatorCalls it does not
 // judge itself: whether the yard is hosted, or has a router, moves no answer
 // of Line, ApproveAsk, SessionScreen or any other, down the link or off it,

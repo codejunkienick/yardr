@@ -100,7 +100,7 @@ func inTheClear(r *http.Request, name, router string, crosses, member, google bo
 		return lineInTheClear(r, router)
 	}
 	if name == "Teammates" {
-		return teammatesInTheClear(r, router, "the teammates list", "Read it on the yard's machine.")
+		return teammatesInTheClear(r, router, "the teammates list", "read it on the yard's machine.")
 	}
 	if name == "UninviteTeammate" {
 		return teammatesInTheClear(r, router, "filing a teammate's removal", "File it on the yard's machine.")
@@ -205,10 +205,13 @@ func forwardedPlain(r *http.Request) bool {
 // command and the device to replace if the token crossed in plain.
 func sourceGrantsInTheClear(r *http.Request, router string) string {
 	const crossed = " The device's token was sent with it and may have crossed a network in the clear: if it did, remove the device and add it again (yardr user device rm)."
-	const readHere = "Read it on the yard's machine (`yardr source grants`)."
+	// readHere follows "or " in two of the refusals below, so it starts in
+	// lower case; the refusal down the link starts a sentence with it and
+	// capitalises it there.
+	const readHere = "read it on the yard's machine (`yardr source grants`)."
 	if r.RemoteAddr == linkRemoteAddr {
 		return "the operator's grant list is not read over the link: this request came down the link from the edge. " +
-			readHere + " The edge saw the device's token with it: remove the device and add it again (yardr user device rm)."
+			"R" + readHere[1:] + " The edge saw the device's token with it: remove the device and add it again (yardr user device rm)."
 	}
 	if ip := net.ParseIP(remote(r)); ip == nil || !ip.IsLoopback() {
 		if fromRouter(r, router) {
@@ -235,7 +238,7 @@ func sourceGrantsInTheClear(r *http.Request, router string) string {
 // operator, as an approval is.
 func sessionScreenInTheClear(r *http.Request, router string) string {
 	const crossed = " The device's token was sent with it and may have crossed a network in the clear: if it did, remove the device and add it again (yardr user device rm)."
-	const readHere = "Read it on the yard's machine."
+	const readHere = "read it on the yard's machine."
 	if r.RemoteAddr == linkRemoteAddr {
 		// Only a device of the operator reaches here (operatorCall).
 		if forwardedPlain(r) {
@@ -269,7 +272,7 @@ func sessionScreenInTheClear(r *http.Request, router string) string {
 // is. The rule is SessionScreen's; the words are the line's own.
 func lineInTheClear(r *http.Request, router string) string {
 	const crossed = " The device's token was sent with it and may have crossed a network in the clear: if it did, remove the device and add it again (yardr user device rm)."
-	const readHere = "Read it on the yard's machine."
+	const readHere = "read it on the yard's machine."
 	if r.RemoteAddr == linkRemoteAddr {
 		// Only a device of the operator reaches here (operatorCall).
 		if forwardedPlain(r) {
@@ -387,10 +390,13 @@ func stageWriteInTheClear(r *http.Request, name string, hosted func() bool) stri
 // id stays off the link with the grant list.
 func telemetryShowInTheClear(r *http.Request, router string) string {
 	const crossed = " The device's token was sent with it and may have crossed a network in the clear: if it did, remove the device and add it again (yardr user device rm)."
-	const readHere = "Read it on the yard's machine (`yardr telemetry show`)."
+	// readHere follows "or " in two of the refusals below, so it starts in
+	// lower case; the refusal down the link starts a sentence with it and
+	// capitalises it there.
+	const readHere = "read it on the yard's machine (`yardr telemetry show`)."
 	if r.RemoteAddr == linkRemoteAddr {
 		return "the telemetry switch is not read over the link: this request came down the link from the edge. " +
-			readHere + " The edge saw the device's token with it: remove the device and add it again (yardr user device rm)."
+			"R" + readHere[1:] + " The edge saw the device's token with it: remove the device and add it again (yardr user device rm)."
 	}
 	if ip := net.ParseIP(remote(r)); ip == nil || !ip.IsLoopback() {
 		if fromRouter(r, router) {
