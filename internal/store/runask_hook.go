@@ -117,7 +117,7 @@ func hookUnknownSays(effective string) string {
 	case HookUnknownIgnore:
 		return fmt.Sprintf("it stores --unknown %s for an unmapped sender: a sender no user maps is dropped, recorded nowhere, and offered no card.", effective)
 	default:
-		return fmt.Sprintf("it stores --unknown %s for an unmapped sender: a sender no user maps has their messages held on a mapping card, delivered when the operator answers it and shown nowhere before.", HookUnknownUnknown)
+		return fmt.Sprintf("it stores --unknown %s for an unmapped sender: a sender no user maps has their messages held on a mapping card, delivered when the operator answers it; until then only the operator can read them.", HookUnknownUnknown)
 	}
 }
 

@@ -859,8 +859,11 @@ func TestHookAskUnknown(t *testing.T) {
 		[]string{"hook", "add", "chatx", "--source", "chatx", "--unknown", "unknown"}) {
 		t.Fatalf("the run ask stores %+v", runAsk.Ask.Run)
 	}
-	if does := strings.Join(runAsk.Ask.Run.Does, "\n"); !strings.Contains(does, "it stores --unknown unknown for an unmapped sender") {
-		t.Fatalf("the card says:\n%s\nwant the --unknown unknown sentence", does)
+	// The sentence also says who reads the messages it holds before the
+	// answer: the operator the mapping card asks, and no one else.
+	if does := strings.Join(runAsk.Ask.Run.Does, "\n"); !strings.Contains(does, "it stores --unknown unknown for an unmapped sender") ||
+		!strings.Contains(does, "delivered when the operator answers it; until then only the operator can read them.") {
+		t.Fatalf("the card says:\n%s\nwant the --unknown unknown sentence, and who reads what it holds", does)
 	}
 	if _, err := y.ApproveAsk(y.ctx, y.bead, runSeq, "mckean", true, nil); err != nil {
 		t.Fatal(err)

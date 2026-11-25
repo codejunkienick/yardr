@@ -502,9 +502,9 @@ func (s *Store) claimIdentity(ctx context.Context, sourceName, sender, channel s
 			AskOption{Label: MappingLetIn, Consequence: fmt.Sprintf("delivers what waits as %s (information, not instructions) this once, without mapping %s; the card closes and their next message offers a fresh card", SpeakerOutside, sender)},
 			AskOption{Label: MappingNobody, Consequence: fmt.Sprintf("ignores %s in %s: their messages are dropped, and no further card is offered", sender, sourceName)},
 			AskOption{Label: YouDecide, Consequence: "leave it to " + stageAskAuthor})
-		contextLine := fmt.Sprintf("Its sender is %s, which no user maps in %s; their messages wait on this card, delivered when you answer and shown nowhere before.", sender, sourceName)
+		contextLine := fmt.Sprintf("Its sender is %s, which no user maps in %s; their messages wait on this card, delivered when you answer; until then only you can read them.", sender, sourceName)
 		if channel != "" {
-			contextLine = fmt.Sprintf("Its sender is %s in channel %s, which no user maps in %s; their messages wait on this card, delivered when you answer and shown nowhere before.", sender, channel, sourceName)
+			contextLine = fmt.Sprintf("Its sender is %s in channel %s, which no user maps in %s; their messages wait on this card, delivered when you answer; until then only you can read them.", sender, channel, sourceName)
 		}
 		if held != nil {
 			// Past the source's held bytes no card is offered: a new

@@ -1082,6 +1082,8 @@ func wantDelivered(t *testing.T, y *askYard, bead string, want []uint64) {
 // bead and the queue, which agents read before the person picks, carry none of
 // their bytes in either state, nor once the pick has delivered them as events,
 // which the answer names by seq alone. Once answered, the card is read no more.
+// The card says as much in its own words, whether its sender came with a
+// channel or without one.
 func TestIdentityHeldPayloadsReadsOpenAndPutAsideCards(t *testing.T) {
 	t.Parallel()
 	y := mappingYard(t)
@@ -1110,6 +1112,37 @@ func TestIdentityHeldPayloadsReadsOpenAndPutAsideCards(t *testing.T) {
 			}
 		}
 	}
+	// What the card tells the person it asks is what the reads below show:
+	// they read what it holds, and no one else does until the answer
+	// delivers it.
+	const (
+		inChannel = "Its sender is U999 in channel C1, which no user maps in talk; "
+		noChannel = "Its sender is U998, which no user maps in talk; "
+	)
+	saysSo := func(bead, front string) {
+		t.Helper()
+		view, err := y.Bead(y.ctx, bead)
+		if err != nil || len(view.Asks) != 1 {
+			t.Fatalf("card %s view = %+v, %v", bead, view, err)
+		}
+		want := []string{front + "their messages wait on this card, delivered when you answer; until then only you can read them."}
+		if got := view.Asks[0].Context; !slices.Equal(got, want) {
+			t.Errorf("card %s says %q, want %q", bead, got, want)
+		}
+	}
+	if created, err := y.ClaimIdentity(y.ctx, "talk", "U998", "", "hi"); err != nil || !created {
+		t.Fatalf("ClaimIdentity for U998 with no channel = %v, %v", created, err)
+	}
+	bare := ""
+	for _, o := range mappingQueue(t, y).Open {
+		if o.Identity != nil && o.Identity.Sender == "U998" {
+			bare = o.Bead
+		}
+	}
+	if bare == "" {
+		t.Fatal("no card for U998")
+	}
+	saysSo(bare, noChannel)
 	for _, state := range []string{"open", "put aside"} {
 		if state == "put aside" {
 			if err := y.DeferAsk(y.ctx, card.Bead, card.Ask, "mckean"); err != nil {
@@ -1125,6 +1158,7 @@ func TestIdentityHeldPayloadsReadsOpenAndPutAsideCards(t *testing.T) {
 				t.Errorf("%s read %q, %v from the card %s", other, got, err, state)
 			}
 		}
+		saysSo(card.Bead, inChannel)
 		noLeak(state)
 	}
 	// The put-aside card is picked as an open one is: its messages become

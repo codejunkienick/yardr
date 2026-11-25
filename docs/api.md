@@ -6164,7 +6164,7 @@ POST /call/Bead
         "asker": "yard",
         "since": "2026-10-08T09:30:00Z",
         "question": "A message reached talk from U111 in channel C1. Who is this?",
-        "context": ["Its sender is U111 in channel C1, which no user maps in talk; their messages wait on this card, delivered when you answer and shown nowhere before."],
+        "context": ["Its sender is U111 in channel C1, which no user maps in talk; their messages wait on this card, delivered when you answer; until then only you can read them."],
         "options": [
           {
             "label": "hal",
