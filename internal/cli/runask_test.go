@@ -56,9 +56,6 @@ func runYardCLI(t *testing.T, name, key string) (*cliYard, *store.Bead) {
 	if _, err := y.st.AddUser(ctx, "ada", "jo"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := y.st.AddTimer(ctx, store.NewTimer{To: "jo", Reason: "stretch", Every: time.Hour}, "jo"); err != nil {
-		t.Fatal(err)
-	}
 	b, err := y.st.CreateBead(ctx, store.NewBead{Title: "the work"}, "jo")
 	if err != nil {
 		t.Fatal(err)
@@ -800,10 +797,13 @@ const (
 )
 
 // runCLI are the commands of internal/cli that the rows of the store's
-// list stand for, by the word a stored command begins with.
+// list stand for, by the word a stored command begins with. Only the words
+// the test looks up are here: a row it holds to its card or its help alone,
+// or runs through a command it builds itself, has no entry, since nothing
+// would read one.
 func runCLI(a *app) map[string]*cobra.Command {
 	return map[string]*cobra.Command{"peer": a.peerCmd(), "source": a.sourceCmd(), "subscribe": a.subscribeCmd(),
-		"user": a.userCmd(), "bead": a.beadCmd(), "crew": a.crewCmd(), "group": a.groupCmd(), "settings": a.settingsCmd(), "timer": a.timerCmd(), "hook": a.hookCmd(), "call": a.callCmd(), "link": a.linkCmd()}
+		"user": a.userCmd(), "crew": a.crewCmd(), "settings": a.settingsCmd(), "hook": a.hookCmd()}
 }
 
 // The store's list of commands a run ask may name is held to the CLI: each
@@ -939,7 +939,7 @@ func TestRunListIsTheCLIs(t *testing.T) {
 		}
 		for _, command := range commands {
 			approved, ab := runYardCLI(t, "approved", key)
-			typed, tb := runYardCLI(t, "typed", key)
+			typed, _ := runYardCLI(t, "typed", key)
 			if use == "yardr source set <source> base=<name>|host=<host>|site=<site>" {
 				// The yard's crm declares no region bases and no
 				// template, so both yards declare them first; an
@@ -1626,7 +1626,6 @@ func TestRunListIsTheCLIs(t *testing.T) {
 				return evs[0].Seq
 			}
 			markApproved, markTyped := lastSeq(approved), lastSeq(typed)
-			beads := map[*cliYard]string{approved: ab.ID, typed: tb.ID}
 			// A hook takes its signing secret first: on the approved
 			// yard it is given on its card, and at a terminal it stands
 			// in the file the command names.
@@ -1652,14 +1651,8 @@ func TestRunListIsTheCLIs(t *testing.T) {
 			} else {
 				runAsk.Carried = carried
 			}
-			asker := "yardmaster"
-			if use == "yardr crew restart <name> [--for <user>]" {
-				// The yardmaster may restart the crew itself, so it
-				// never asks: the row's ask comes from ada, a user.
-				asker = "ada"
-			}
 			seq, err := approved.st.AddAsk(ctx, ab.ID, store.Ask{Question: "Run it?", To: "jo", Context: []string{"why"},
-				Run: runAsk}, asker)
+				Run: runAsk}, "yardmaster")
 			if err != nil {
 				t.Fatalf("%s: %v", use, err)
 			}
@@ -1766,18 +1759,6 @@ func TestRunListIsTheCLIs(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				timers, err := y.st.Timers(ctx, "")
-				if err != nil {
-					t.Fatal(err)
-				}
-				var timerIDs []map[string]any
-				for _, tm := range timers {
-					timerIDs = append(timerIDs, map[string]any{"id": tm.ID, "by": tm.By, "to": tm.To, "reason": tm.Reason, "every": tm.Every})
-				}
-				journal, err := y.st.GetBead(ctx, "yardmaster-journal")
-				if err != nil {
-					t.Fatal(err)
-				}
 				hooks, err := y.st.Hooks(ctx)
 				if err != nil {
 					t.Fatal(err)
@@ -1802,21 +1783,13 @@ func TestRunListIsTheCLIs(t *testing.T) {
 				for _, g := range gs {
 					groupNames = append(groupNames, g.Name)
 				}
-				var linkRows []map[string]any
-				ls, err := y.st.Links(ctx, beads[y])
-				if err != nil {
-					t.Fatal(err)
-				}
-				for _, l := range ls {
-					linkRows = append(linkRows, map[string]any{"source": l.Source, "kind": l.Kind, "url": l.URL})
-				}
 				var hookRows []map[string]any
 				for _, h := range hooks {
 					hookRows = append(hookRows, map[string]any{"name": h.Name, "source": h.Source, "file": filepath.Base(h.SecretFile)})
 				}
 				var changes []map[string]any
 				for _, kind := range []string{"peer_added", "peer_allowed", "source_set", "source_granted", "subscribed", "user_set",
-					"peer_renamed", "peer_removed", "user_added", "user_removed", "crew_defined", "setting_changed", "source_added", "hook_added", "identity_set", "identity_removed", "sender_unignored", "peer_intake", "peer_identity_set", "peer_url_set", "hook_removed"} {
+					"peer_renamed", "peer_removed", "user_added", "crew_defined", "setting_changed", "source_added", "hook_added", "identity_set", "identity_removed", "sender_unignored", "peer_intake", "peer_identity_set", "peer_url_set", "hook_removed"} {
 					evs, err := y.st.EventsOfKind(ctx, kind, 10)
 					if err != nil {
 						t.Fatal(err)
@@ -1838,10 +1811,10 @@ func TestRunListIsTheCLIs(t *testing.T) {
 				if len(changes) != wantChanges {
 					t.Errorf("%s: %d changes were logged for %q", use, len(changes), done.Result)
 				}
-				text, err := json.Marshal(map[string]any{"peers": peers, "sources": sources, "grants": grants, "hooks": hookRows, "devices": devices, "links": linkRows,
+				text, err := json.Marshal(map[string]any{"peers": peers, "sources": sources, "grants": grants, "hooks": hookRows, "devices": devices,
 					"subscriptions": jo.Subscriptions, "tell": jo.Tell, "changes": changes, "users": users, "groups": groupNames,
 					"crew":     map[string]any{"name": crew.Name, "runner": crew.Runner, "journal": crew.Journal, "config": crew.Config, "identities": crew.Identities},
-					"settings": settings, "timers": timerIDs, "journal": journal.Originator})
+					"settings": settings})
 				if err != nil {
 					t.Fatal(err)
 				}
