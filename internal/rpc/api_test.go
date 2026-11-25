@@ -1214,7 +1214,7 @@ var apiOperatorCalls = []apiCall{
 	},
 	{
 		method: "Line",
-		says:   "Reads one depot's line: every flow that governs the depot, the depot's own first and then one per type, with its stages in the flow's order, who serves each stage, its stage file and the prompts of its groups and of the crew, whole. A stage file carries the digest a save of it is held to and, where its `## Ask` section is broken, the warning of it; a store flow's also carries the text its latest save replaced, which the yard keeps in its `stage-history/` directory, so that one more save puts it back. It changes nothing. The representative route of a stage is the route a probe bead of the depot, of the flow's type (the default type where the flow has none) at the default priority with no labels reading as the operator's would take, answered whole; every other effective route of the stage stands behind it with its id, scope, filters and first group, so a stage whose labelled, urgent or another user's beads take a different rule shows that rule. A rule's scope is `this depot's own` where it names the depot and `yard-wide` where it names none: a yard-wide rule serves every depot with no own route of its match key. Each filter is named and shown as unset where it is unset: an empty `type` takes any type, empty `labels` no label, an empty `priority` any priority, and an empty `originator` the operator's beads alone. A prompt a card cannot carry says why, by the card's own rules, and one that cannot be read names the paths tried and fails nothing else; no env file path stands anywhere in the answer. It is the operator's to read: on the socket the operator's alone, and on the listener there for a device of the operator and for no other caller. A `cmd` and a prompt are the operator's to read alone, so the listener takes it only over https or from the yard's own machine, like the other calls of this list, and down the link from the edge from a paired device of the operator, as an approval ([edge.md](edge.md#footplate-through-the-link)). A depot the yard has not is `not-found`.",
+		says:   "Reads one depot's line: every flow that governs the depot, the depot's own first and then one per type, with its stages in the flow's order, who serves each stage, its stage file and the prompts of its groups and of the crew, whole. A stage file carries the digest a save of it is held to and, where its `## Ask` section is broken, the warning of it; a store flow's also carries the text its latest save replaced, which the yard keeps in its `stage-history/` directory, so that one more save puts it back. A store flow that stands in front of a file of the depot's repository says where it differs from it (`differs_from_repo`, on the flow and on each stage whose file differs), compared as both stand now, so it does not say which side moved. It changes nothing. The representative route of a stage is the route a probe bead of the depot, of the flow's type (the default type where the flow has none) at the default priority with no labels reading as the operator's would take, answered whole; every other effective route of the stage stands behind it with its id, scope, filters and first group, so a stage whose labelled, urgent or another user's beads take a different rule shows that rule. A rule's scope is `this depot's own` where it names the depot and `yard-wide` where it names none: a yard-wide rule serves every depot with no own route of its match key. Each filter is named and shown as unset where it is unset: an empty `type` takes any type, empty `labels` no label, an empty `priority` any priority, and an empty `originator` the operator's beads alone. A prompt a card cannot carry says why, by the card's own rules, and one that cannot be read names the paths tried and fails nothing else; no env file path stands anywhere in the answer. It is the operator's to read: on the socket the operator's alone, and on the listener there for a device of the operator and for no other caller. A `cmd` and a prompt are the operator's to read alone, so the listener takes it only over https or from the yard's own machine, like the other calls of this list, and down the link from the edge from a paired device of the operator, as an approval ([edge.md](edge.md#footplate-through-the-link)). A depot the yard has not is `not-found`.",
 		args: []field{
 			{"depot", "string", "the depot whose line is read"},
 		},
@@ -1227,6 +1227,7 @@ var apiOperatorCalls = []apiCall{
 			{"flows[].type", "string", "the bead type the flow governs; `\"\"` for the depot's own"},
 			{"flows[].source", "string", "`repo@<commit>` for a git depot's repository flow, `repo (directory)` for a dir depot's directory flow, `pack <name>` for a pack-managed store flow, `store` for any other store flow"},
 			{"flows[].directory", "string?", "the directory a dir depot's directory flow was read from; absent on any other flow"},
+			{"flows[].differs_from_repo", "bool?", "`true` where a flow in the store reads other than the files of the depot's repository it stands in front of, compared as both stand now: its stages and transitions, the file of one of its stages, a flow file there that does not parse, or, for the depot's own flow, a type's file there that no pointer of its own answers for. It does not say which side moved, since the yard records nothing of what a copy was made from. Absent where nothing differs, on a repository flow and on a store flow that stands in front of no file"},
 			{"flows[].stages", "array", "the stages in the flow's order"},
 			{"flows[].stages[].stage", "string", "the stage"},
 			{"flows[].stages[].next", "array of string", "the stages a bead in it may move to, in the flow's order; empty where the flow allows none"},
@@ -1282,6 +1283,7 @@ var apiOperatorCalls = []apiCall{
 			{"flows[].stages[].stage_file.prior_digest", "string?", "the SHA-256 of the text the latest save of a store flow's stage file replaced (a `yardr flow copy-repo` that wrote over the file counts as one), which the yard keeps (`<home>/stage-history/<sha256>`); absent where that save created the file, where the kept text is gone, is not what its name says or is longer than 32 KiB, and on a flow of a depot's repository"},
 			{"flows[].stages[].stage_file.prior_text", "string?", "that text whole, as `yardr flow set-stage <flow> <stage> -f <home>/stage-history/<sha256>` puts it back; absent where `prior_digest` is"},
 			{"flows[].stages[].stage_file.warning", "string?", "where the file's `## Ask` section is broken, as `<path>: <why>`, which `yardr flow show` warns of too; a save is never refused for it; absent where it is not"},
+			{"flows[].stages[].differs_from_repo", "bool?", "`true` where the stage file of a store flow, or its lack of one, differs from the repository's file for the stage, byte for byte (a file with nothing in it is none); absent where it does not, and on a repository flow"},
 			{"crew", "array", "the crew members, each with its prompt where its config names one (as a stage's prompt says it); a member with none carries its name alone"},
 			{"crew[].name", "string", "the crew member"},
 			{"crew[].prompt", "object?", "the crew member's prompt where its config names one; absent otherwise"},
@@ -2857,6 +2859,27 @@ func apiLineFixtures(t *testing.T, st *store.Store) {
 		_, err = st.PutStageFile(ctx, "default", f[0], f[1], "", "jo", true)
 		must(err)
 	}
+	// A store flow in front of a file of the notes directory, for the Line's
+	// differs_from_repo: the directory has a flow for bugs, and the yard points
+	// bugs at a flow of the same stages whose stage file reads otherwise.
+	notes, err := st.GetDepot(ctx, "notes")
+	must(err)
+	for name, text := range map[string]string{
+		".yardr/flows/type/bug.flow":      "triage -> fixed\nfixed terminal\n",
+		".yardr/flows/type/bug/triage.md": "Find the cause.\n",
+	} {
+		path := filepath.Join(notes.Path, filepath.FromSlash(name))
+		must(os.MkdirAll(filepath.Dir(path), 0o755))
+		must(os.WriteFile(path, []byte(text), 0o644))
+	}
+	bugs, err := store.ParseFlow("triage -> fixed\nfixed terminal\n")
+	must(err)
+	bugs.Name = "bugs"
+	_, err = st.PutFlow(ctx, *bugs, "jo")
+	must(err)
+	must(st.SetFlowPointer(ctx, "notes", "bug", "bugs", "jo"))
+	_, err = st.PutStageFile(ctx, "bugs", "triage", "Find the cause, and write it down.\n", "", "jo", true)
+	must(err)
 }
 
 // apiHookSource is the declaration of a source of the doc's yard whose

@@ -231,7 +231,7 @@ func TestDepotSourceFlow(t *testing.T) {
 	}
 	got := sourceLines(t, out)
 	if len(got) != 9 || !strings.HasPrefix(got[0], "flow default pack starter (store starter.default) shadows .yardr/flows/default.flow") ||
-		got[2] != "stage new pack starter ("+filepath.Join(home, "flows", "starter.default", "new.md")+") shadows .yardr/flows/default/new.md" || !strings.HasPrefix(got[8], "the flow switched whole") {
+		got[2] != "stage new pack starter ("+filepath.Join(home, "flows", "starter.default", "new.md")+") shadows .yardr/flows/default/new.md; "+differsWords || !strings.HasPrefix(got[8], "the flow switched whole") {
 		t.Errorf("to the pack's:\n%s", out)
 	}
 	if got := sourcesLine(t, a, "flow default"); !strings.HasPrefix(got, "flow default pack starter ") {
@@ -259,7 +259,7 @@ func TestDepotSourceFlowOfAType(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := sourceLines(t, out); got[0] != "flow type/decision pack ask (store code) shadows .yardr/flows/type/decision.flow, .yardr/flows/type/decision/ask.md" {
+	if got := sourceLines(t, out); got[0] != "flow type/decision pack ask (store code) shadows .yardr/flows/type/decision.flow, .yardr/flows/type/decision/ask.md; "+differsWords {
 		t.Errorf("to the pack's:\n%s", out)
 	}
 	if _, err = run(t, a.depotSourceCmd(), "web", "flow", "pack"); err != nil {

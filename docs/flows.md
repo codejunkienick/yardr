@@ -191,6 +191,26 @@ it has, and so is one whose governing file does not parse.
   copies stand: a change that lands in `.yardr/flows/` is not read for them,
   and the copies change in the yard only. `yardr depot sources <depot>` shows
   where each flow and stage comes from.
+- **Whether they still agree.** The yard keeps no record of what a copy was
+  copied from, so `yardr depot sources <depot>` and the [`Line`](api.md#line)
+  compare each store flow and its stage files in the home with the repository's
+  files it stands in front of, as both stand when asked, and say `differs from
+  the repository` where they do not (`differs` in `--json`, `differs_from_repo`
+  in the `Line`, on the flow and on each stage whose file differs). A copy as it
+  was made says nothing; one whose stage file was saved since with `flow
+  set-stage`, or whose repository file changed since, says so, and says
+  nothing again when the two read alike. The flow is compared as its text reads
+  back (comments, blank lines and spacing do not count), each stage's file byte
+  for byte (a stage with no file and one with nothing in it are the same), and
+  a repository file that does not parse differs. For the depot's own flow, so
+  does a `type/<type>.flow` that landed in the repository after the copy and
+  that no pointer of that type answers for, since nothing reads it. It does not
+  say which side moved. A type's copy is compared with the repository's
+  `type/<type>.flow`, else with the flow file named like the copy with `.local`
+  taken off (`yardr.train.local` against `yardr.train.flow`); a copy under
+  another name, such as `box.flow` as `crates.box`, is compared with nothing.
+  The same words stand beside a pack's flow that stands in front of a file of
+  the depot's repository and reads otherwise.
 - **Pointing back.** The commands the output prints point each pointer at the
   repository again, the depot's before the types' (the depot's pointer stands in
   front of their files), and leave the copy in the store and its stage files in
@@ -739,9 +759,11 @@ Where it shows:
   flow file beside it. A file on a bead's branch is not read. A file whose
   `## Ask` section is broken is a warning there too, beside the file.
 - **`yardr depot sources <depot>`.** One line per non-terminal stage of the
-  flows governing the depot: where its stage file comes from, or `none`, and
-  the repository's stage file it shadows when a store flow governs
-  ([configuration.md](configuration.md#where-a-depots-flows-stage-files-and-roles-come-from)).
+  flows governing the depot: where its stage file comes from, or `none`, the
+  repository's stage file it shadows when a store flow governs, and `differs
+  from the repository` where the yard's file reads other than that one
+  ([configuration.md](configuration.md#where-a-depots-flows-stage-files-and-roles-come-from),
+  [Whether they still agree](#copying-a-repositorys-flows-into-the-store)).
 
 What goes in a stage file and what in a role prompt is in
 [groups.md](groups.md#role-file-or-stage-file). The packs yardr carries have a

@@ -55,6 +55,10 @@ type depotSource struct {
 	Shadows []string `json:"shadows,omitempty"`
 	// Available says what else the depot could take the object from.
 	Available []string `json:"available,omitempty"`
+	// Differs says that a flow or stage file in the store reads other than the
+	// file of the depot's repository it stands in front of, compared as both are
+	// now (store.FlowDiffersFromRepo); it does not say which side moved.
+	Differs bool `json:"differs,omitempty"`
 	// Error says why the source could not be read: a prompt that names a
 	// file nobody has.
 	Error string `json:"error,omitempty"`
@@ -85,6 +89,11 @@ yard's home), file (any other path) and none.
 while the line is as it is: the flow file behind a store pointer, the stage
 file of a repository flow that does not govern, the depot's own role behind a
 group prompted from elsewhere.
+
+"differs from the repository" says that a flow or stage file in the store reads
+other than the repository's file it stands in front of, compared as both are
+now. The yard keeps no record of what a copy was made from, so it does not say
+whether the copy was edited or the repository changed since.
 
 This view changes nothing. yardr depot source switches one flow or role
 between the depot's and the pack's; yardr depot flow points the depot at any flow,
@@ -151,11 +160,15 @@ func (l depotSource) where() string {
 	return out
 }
 
-// aside says what the line shadows and what else is available.
+// aside says what the line shadows, whether it differs from the repository's
+// file, and what else is available.
 func (l depotSource) aside() string {
 	var out []string
 	if len(l.Shadows) > 0 {
 		out = append(out, "shadows "+strings.Join(l.Shadows, ", "))
+	}
+	if l.Differs {
+		out = append(out, "differs from the repository")
 	}
 	return strings.Join(append(out, l.Available...), "; ")
 }
@@ -315,11 +328,7 @@ func (b *sourcer) flows() error {
 	if !slices.ContainsFunc(governing, func(g store.DepotFlow) bool { return g.Type == "" }) {
 		b.lines = append(b.lines, depotSource{Kind: "flow", Name: "default", Source: sourceNone, Available: b.packFlows()})
 	}
-	// The types whose pointer in the store answers for their own file.
-	pointed := map[string]bool{}
-	for _, g := range governing {
-		pointed[g.Type] = g.Source.Kind == "store"
-	}
+	pointed := store.PointedTypes(governing)
 	for _, g := range governing {
 		f := g.Flow
 		place := "default"
@@ -356,6 +365,13 @@ func (b *sourcer) flows() error {
 				fl.Shadows = append(fl.Shadows, path)
 			}
 		}
+		// What the store holds is read against the repository's files as they
+		// stand, the read the Line makes, from the repository read above.
+		flowDiffers, stageDiffers, err := store.FlowDiffersFromRepo(b.home, g, repo, pointed)
+		if err != nil {
+			return err
+		}
+		fl.Differs = flowDiffers
 		files := g.StageFiles
 		if g.Source.InStore() {
 			if files, _, err = store.HomeStageFiles(b.home, f); err != nil {
@@ -382,7 +398,7 @@ func (b *sourcer) flows() error {
 			if f.IsTerminal(s) {
 				continue
 			}
-			sl := depotSource{Kind: "stage", Name: s, Flow: f.Name, Type: g.Type, Source: sourceNone}
+			sl := depotSource{Kind: "stage", Name: s, Flow: f.Name, Type: g.Type, Source: sourceNone, Differs: stageDiffers[s]}
 			if path := files[s]; path != "" {
 				sl.Source, sl.Pack, sl.Path = fl.Source, fl.Pack, path
 				switch {

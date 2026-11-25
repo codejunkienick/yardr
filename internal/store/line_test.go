@@ -111,6 +111,10 @@ func TestLineGitDepotRepoFlow(t *testing.T) {
 	for _, s := range f.Stages {
 		stages = append(stages, s.Stage)
 	}
+	if got := lineDrift(line); len(got) != 0 {
+		// The repository's flow is what it is compared with, never the compared.
+		t.Errorf("a repository flow says %v differ from the repository", got)
+	}
 	if strings.Join(stages, ",") != "backlog,new,review,merged" {
 		t.Errorf("stages = %v, want backlog,new,review,merged", stages)
 	}
@@ -259,6 +263,9 @@ func TestLineDirDepotDirectoryAndStoreFlows(t *testing.T) {
 	if sf.Source != "store" || sf.Directory != "" {
 		t.Errorf("store flow = %q in %q, want store with no directory", sf.Source, sf.Directory)
 	}
+	if got := lineDrift(line); len(got) != 0 {
+		t.Errorf("the directory's flow and a store flow in front of no file say %v differ from the repository", got)
+	}
 	// A bead the directory flow leaves behind when it loses its stage
 	// stands in the flow's warnings, as flow show prints it.
 	_, err = api.CreateBead(ctx, store.NewBead{Title: "docs-a", ID: "docs-a", Stage: "inbox", Depot: "docs"}, "me")
@@ -305,6 +312,9 @@ func TestLineStoreFlowPackAndPlain(t *testing.T) {
 	}
 	if got := lineFlow(t, line, "packed", "bug").Source; got != "pack starter" {
 		t.Errorf("packed source = %q, want pack starter", got)
+	}
+	if got := lineDrift(line); len(got) != 0 {
+		t.Errorf("store flows of a depot with no repository say %v differ from it", got)
 	}
 }
 

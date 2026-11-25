@@ -333,10 +333,10 @@ and what it shadows or what else is available.
 ```
 $ yardr depot sources yardr
 KIND   NAME            SOURCE
-flow   default         pack starter (store starter.default)                     shadows .yardr/flows/default.flow
-stage  new             pack starter (~/.yardr/flows/starter.default/new.md)     shadows .yardr/flows/default/new.md
-stage  review          pack starter (~/.yardr/flows/starter.default/review.md)  shadows .yardr/flows/default/review.md
-stage  decide          pack starter (~/.yardr/flows/starter.default/decide.md)
+flow   default         pack starter (store starter.default)                     shadows .yardr/flows/default.flow; differs from the repository
+stage  new             pack starter (~/.yardr/flows/starter.default/new.md)     shadows .yardr/flows/default/new.md; differs from the repository
+stage  review          pack starter (~/.yardr/flows/starter.default/review.md)  shadows .yardr/flows/default/review.md; differs from the repository
+stage  decide          pack starter (~/.yardr/flows/starter.default/decide.md)  differs from the repository
 role   yardr-builders  depot (.yardr/roles/builder.md@add63e5)                    pack starter has a copy
 role   yardr-reviewers pack starter (~/.yardr/packs/starter/roles/reviewer.md)  shadows .yardr/roles/reviewer.md
 role   yardmaster      home (~/.yardr/roles/yardmaster.md)
@@ -374,9 +374,21 @@ flow that match no stage of the governing one are listed on the flow's
 line. `pack <name> has a copy` and `pack <name> has flow <flow>` say what
 the depot could take instead.
 
+`differs from the repository` says that a flow in the store, or a stage file of
+it in the yard's home, reads other than the repository's file it stands in
+front of, as both are now: after `yardr flow copy-repo` a line says nothing of
+it, and says so once the copy was edited or the repository changed, and no more
+once the two read alike. It does not say which side moved, since the yard keeps
+no record of what the copy was made from. A stage line says it where its own
+file differs, including a file the yard has and the repository has none of, and
+the reverse; the flow's line says it where any of its stages do, where the flow
+itself does, and where the repository has a type's file behind the depot's
+pointer that no pointer of the type answers for
+([flows.md](flows.md#copying-a-repositorys-flows-into-the-store)).
+
 `--json` prints the lines as data: `kind`, `name`, `flow`, `type`,
-`source`, `pack`, `path`, `commit`, `shadows`, `available`, `error`. The
-view changes nothing.
+`source`, `pack`, `path`, `commit`, `shadows`, `available`, `differs`, `error`.
+The view changes nothing.
 
 #### Switching one of them
 

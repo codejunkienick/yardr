@@ -40,8 +40,15 @@ type LineFlow struct {
 	Source string `json:"source"`
 	// Directory is the directory a dir depot's directory flow was read
 	// from, named beside its source; absent on any other flow.
-	Directory string      `json:"directory,omitempty"`
-	Stages    []LineStage `json:"stages"`
+	Directory string `json:"directory,omitempty"`
+	// DiffersFromRepo says that a store flow reads other than the file of the
+	// depot's repository it stands in front of, as FlowDiffersFromRepo has it:
+	// its stages, a stage file of it, or a type's file the repository has that
+	// nothing reads. It is compared live and kept nowhere, so it does not say
+	// which side moved. Absent on a repository flow, on a store flow that
+	// shadows nothing and where nothing differs.
+	DiffersFromRepo bool        `json:"differs_from_repo,omitempty"`
+	Stages          []LineStage `json:"stages"`
 	// Warnings are the flow's stranded beads, as flow show prints them.
 	Warnings []string `json:"warnings,omitempty"`
 }
@@ -67,6 +74,10 @@ type LineStage struct {
 	// Warnings say why beads in the stage wait: no route serves it.
 	Warnings  []string       `json:"warnings,omitempty"`
 	StageFile *LineStageFile `json:"stage_file,omitempty"`
+	// DiffersFromRepo says that the stage file of a store flow, or its lack
+	// of one, differs from the repository's file for the stage, as the flow's
+	// DiffersFromRepo has it.
+	DiffersFromRepo bool `json:"differs_from_repo,omitempty"`
 }
 
 // LineStageFile is a stage's file where it has one: its path as flow show
@@ -292,10 +303,17 @@ func (s *Store) Line(ctx context.Context, depot string) (*Line, error) {
 	for _, rf := range flows {
 		typed[rf.Type] = rf.Type != ""
 	}
+	pointed := PointedTypes(flows)
 	effective := EffectiveRoutes(routes, &depot, operator, byGroup)
 	out := &Line{Depot: depot, Kind: d.Kind, Flows: []LineFlow{}, Crew: []LineCrew{}}
 	for _, rf := range flows {
 		lf := LineFlow{Name: rf.Flow.Name, Type: rf.Type, Stages: []LineStage{}}
+		// The repository read above answers this too: no git of its own.
+		flowDiffers, stageDiffers, err := FlowDiffersFromRepo(s.home, rf, repo, pointed)
+		if err != nil {
+			return nil, err
+		}
+		lf.DiffersFromRepo = flowDiffers
 		switch {
 		case !rf.Source.InStore():
 			if rf.Source.Commit != "" {
@@ -319,6 +337,7 @@ func (s *Store) Line(ctx context.Context, depot string) (*Line, error) {
 			if err != nil {
 				return nil, err
 			}
+			ls.DiffersFromRepo = stageDiffers[stage]
 			lf.Stages = append(lf.Stages, ls)
 		}
 		out.Flows = append(out.Flows, lf)

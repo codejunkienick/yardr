@@ -11,6 +11,7 @@ import (
 
 	"yardr.dev/yardr/internal/config"
 	"yardr.dev/yardr/internal/store"
+	"yardr.dev/yardr/internal/storetest"
 )
 
 // sourcesYard is stageYard's depot "web" with a role and a stage file of its
@@ -48,6 +49,10 @@ func sourcesYard(t *testing.T) (a *app, home, sha string) {
 	}
 	return a, home, git("rev-parse", "HEAD")[:7]
 }
+
+// differsWords is what a line says of a flow or stage file in the store that
+// reads other than the repository's file it stands in front of.
+const differsWords = "differs from the repository"
 
 func writeFile(t *testing.T, path, text string) {
 	t.Helper()
@@ -127,14 +132,14 @@ func TestDepotSourcesAppliedPack(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantLines(t, out,
-		"flow default pack starter (store starter.default) shadows .yardr/flows/default.flow, .yardr/flows/type/decision.flow, .yardr/flows/type/decision/ask.md",
-		"stage default:backlog pack starter ("+filepath.Join(stages, "backlog.md")+")",
-		"stage default:new none shadows .yardr/flows/default/new.md",
-		"stage default:review pack starter ("+stageFile+") shadows .yardr/flows/default/review.md",
-		"stage default:review-security pack starter ("+filepath.Join(stages, "review-security.md")+")",
-		"stage default:clear pack starter ("+filepath.Join(stages, "clear.md")+")",
-		"stage default:approved pack starter ("+filepath.Join(stages, "approved.md")+")",
-		"stage default:decide pack starter ("+filepath.Join(stages, "decide.md")+")",
+		"flow default pack starter (store starter.default) shadows .yardr/flows/default.flow, .yardr/flows/type/decision.flow, .yardr/flows/type/decision/ask.md; "+differsWords,
+		"stage default:backlog pack starter ("+filepath.Join(stages, "backlog.md")+") "+differsWords,
+		"stage default:new none shadows .yardr/flows/default/new.md; "+differsWords,
+		"stage default:review pack starter ("+stageFile+") shadows .yardr/flows/default/review.md; "+differsWords,
+		"stage default:review-security pack starter ("+filepath.Join(stages, "review-security.md")+") "+differsWords,
+		"stage default:clear pack starter ("+filepath.Join(stages, "clear.md")+") "+differsWords,
+		"stage default:approved pack starter ("+filepath.Join(stages, "approved.md")+") "+differsWords,
+		"stage default:decide pack starter ("+filepath.Join(stages, "decide.md")+") "+differsWords,
 		"flow type/train pack starter (store starter.train)",
 		"stage train:backlog none", "stage train:open none", "stage train:review none", "stage train:review-security none", "stage train:approved none",
 		"stage train:in-pr pack starter ("+filepath.Join(trainStages, "in-pr.md")+")", "stage train:land none", "stage train:merge pack starter ("+filepath.Join(trainStages, "merge.md")+")", "stage train:decide none",
@@ -155,7 +160,7 @@ func TestDepotSourcesAppliedPack(t *testing.T) {
 	if l := slices.IndexFunc(lines, func(l depotSource) bool {
 		return l.Kind == "stage" && l.Name == "review" && l.Flow == "starter.default"
 	}); l < 0 || lines[l].Source != sourcePack || lines[l].Pack != "starter" ||
-		lines[l].Path != stageFile || len(lines[l].Shadows) != 1 || lines[l].Shadows[0] != ".yardr/flows/default/review.md" {
+		lines[l].Path != stageFile || len(lines[l].Shadows) != 1 || lines[l].Shadows[0] != ".yardr/flows/default/review.md" || !lines[l].Differs {
 		t.Errorf("--json review not found: %+v", lines)
 	}
 }
@@ -180,14 +185,14 @@ func TestDepotSourcesPackFlowDepotRoles(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantLines(t, out,
-		"flow default pack starter (store starter.default) shadows .yardr/flows/default.flow, .yardr/flows/type/decision.flow, .yardr/flows/type/decision/ask.md",
-		"stage default:backlog pack starter ("+filepath.Join(stages, "backlog.md")+")",
-		"stage default:new pack starter ("+filepath.Join(stages, "new.md")+") shadows .yardr/flows/default/new.md",
-		"stage default:review pack starter ("+filepath.Join(stages, "review.md")+") shadows .yardr/flows/default/review.md",
-		"stage default:review-security pack starter ("+filepath.Join(stages, "review-security.md")+")",
-		"stage default:clear pack starter ("+filepath.Join(stages, "clear.md")+")",
-		"stage default:approved pack starter ("+filepath.Join(stages, "approved.md")+")",
-		"stage default:decide pack starter ("+filepath.Join(stages, "decide.md")+")",
+		"flow default pack starter (store starter.default) shadows .yardr/flows/default.flow, .yardr/flows/type/decision.flow, .yardr/flows/type/decision/ask.md; "+differsWords,
+		"stage default:backlog pack starter ("+filepath.Join(stages, "backlog.md")+") "+differsWords,
+		"stage default:new pack starter ("+filepath.Join(stages, "new.md")+") shadows .yardr/flows/default/new.md; "+differsWords,
+		"stage default:review pack starter ("+filepath.Join(stages, "review.md")+") shadows .yardr/flows/default/review.md; "+differsWords,
+		"stage default:review-security pack starter ("+filepath.Join(stages, "review-security.md")+") "+differsWords,
+		"stage default:clear pack starter ("+filepath.Join(stages, "clear.md")+") "+differsWords,
+		"stage default:approved pack starter ("+filepath.Join(stages, "approved.md")+") "+differsWords,
+		"stage default:decide pack starter ("+filepath.Join(stages, "decide.md")+") "+differsWords,
 		"flow type/train pack starter (store starter.train)",
 		"stage train:backlog none", "stage train:open none", "stage train:review none", "stage train:review-security none", "stage train:approved none",
 		"stage train:in-pr pack starter ("+filepath.Join(trainStages, "in-pr.md")+")", "stage train:land none", "stage train:merge pack starter ("+filepath.Join(trainStages, "merge.md")+")", "stage train:decide none",
@@ -262,6 +267,103 @@ func TestDepotSourcesStoreFlowAndHomeRole(t *testing.T) {
 	if last := got[len(got)-1]; last != "rules web none" {
 		t.Errorf("a depot without the file: %s", last)
 	}
+}
+
+// A flow copied from the repository reads as the repository's does, and its
+// lines say nothing of it. Once the yard's copy or the repository moves, the
+// flow's line and the line of each stage whose file differs say "differs from
+// the repository" (and --json says differs), and they say nothing again where
+// the two read alike: a stage file the yard has and the repository has none
+// of, and one the repository has and the yard has none of, included.
+func TestDepotSourcesSaysWhereACopyDiffersFromTheRepository(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	st := storetest.NewIn(t, home)
+	dir := copyRepoFiles(t, map[string]string{
+		"default.flow":       "backlog -> new\nnew -> review\nreview -> done\ndone terminal\n",
+		"default/backlog.md": "Wait here.\n",
+		"default/new.md":     "Build it.\n",
+	})
+	if err := st.PutDepot(context.Background(), store.Depot{Name: "web", Kind: store.DepotDir, Path: dir}, "me"); err != nil {
+		t.Fatal(err)
+	}
+	a := &app{st: st, actor: "me", cfg: &config.Config{Home: home}}
+	if out, err := run(t, a.flowCmd(), "copy-repo", "web"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	copied := func(stage string) string { return filepath.Join(home, "flows", "web.default", stage+".md") }
+	repo := func(stage string) string { return filepath.Join(dir, store.RepoFlowDir, "default", stage+".md") }
+	sources := func() string {
+		t.Helper()
+		out, err := run(t, a.depotSourcesCmd(), "web")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	// differing names, as --json has them, the lines that say they differ.
+	differing := func() (names []string, raw string) {
+		t.Helper()
+		a.json = true
+		defer func() { a.json = false }()
+		raw = sources()
+		var lines []depotSource
+		if err := json.Unmarshal([]byte(raw), &lines); err != nil {
+			t.Fatalf("--json: %v\n%s", err, raw)
+		}
+		for _, l := range lines {
+			if l.Differs {
+				names = append(names, l.Kind+" "+l.Name)
+			}
+		}
+		return names, raw
+	}
+	want := func(names ...string) {
+		t.Helper()
+		if got, raw := differing(); !slices.Equal(got, names) {
+			t.Errorf("the lines that differ are %v, want %v:\n%s", got, names, raw)
+		}
+	}
+
+	same := []string{
+		"flow default store (store web.default) shadows .yardr/flows/default.flow",
+		"stage backlog home (" + copied("backlog") + ") shadows .yardr/flows/default/backlog.md",
+		"stage new home (" + copied("new") + ") shadows .yardr/flows/default/new.md",
+		"stage review none",
+		"rules web none",
+	}
+	wantLines(t, sources(), same...)
+	if names, raw := differing(); len(names) != 0 || strings.Contains(raw, `"differs"`) {
+		t.Errorf("a copy that is the repository's says it differs: %v\n%s", names, raw)
+	}
+
+	// The yard's copy is edited, and then put back.
+	writeFile(t, copied("new"), "Build it, then test it.\n")
+	wantLines(t, sources(),
+		same[0]+"; "+differsWords, same[1], same[2]+"; "+differsWords, same[3], same[4])
+	want("flow default", "stage new")
+	writeFile(t, copied("new"), "Build it.\n")
+	want()
+
+	// The repository moves, and moves back.
+	writeFile(t, repo("backlog"), "Wait over there.\n")
+	want("flow default", "stage backlog")
+	writeFile(t, repo("backlog"), "Wait here.\n")
+	want()
+
+	// The yard has a file for a stage the repository has none for, and has
+	// none for a stage the repository has one.
+	writeFile(t, copied("review"), "Review it.\n")
+	if err := os.Remove(copied("backlog")); err != nil {
+		t.Fatal(err)
+	}
+	wantLines(t, sources(),
+		same[0]+"; "+differsWords,
+		"stage backlog none shadows .yardr/flows/default/backlog.md; "+differsWords,
+		same[2],
+		"stage review home ("+copied("review")+") "+differsWords,
+		same[4])
+	want("flow default", "stage backlog", "stage review")
 }
 
 func TestDepotSourcesIncludesAllPotentialRouteGroups(t *testing.T) {
