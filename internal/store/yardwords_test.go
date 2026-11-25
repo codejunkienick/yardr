@@ -26,9 +26,21 @@ func TestHeldYardWordsOfAFailedFetchOrLogin(t *testing.T) {
 		t.Fatal(err)
 	}
 	at := y.now
+	// The row is the stay the bead is in, with the stage and the entered seq
+	// that PeerBeadSend records. The settler's first sweep can run at any
+	// point after Open, and it settles a row whose bead has left its stay as
+	// stale, which leaves no fetch for PeerFetchFailed to fail.
 	if err := y.write(func(w *wtx) error {
+		var row beadRow
+		if _, err := get(w.Tx, bBeads, fetch.UUID, &row); err != nil {
+			return err
+		}
+		entered, _, err := stayOf(w.Tx, fetch.UUID)
+		if err != nil {
+			return err
+		}
 		return put(w.Tx, bPeerSent, fetch.UUID, peerSent{Bead: fetch.UUID, Was: "north",
-			Stage: "work", Message: "stay-1", At: y.now, EndedAt: &at, Outcome: "done",
+			Stage: row.Stage, Entered: entered, Message: "stay-1", At: y.now, EndedAt: &at, Outcome: "done",
 			Git: &PeerGit{Branch: "yard/yb-1", Commit: "abc1234", Remote: "origin"}})
 	}); err != nil {
 		t.Fatal(err)
