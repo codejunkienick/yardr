@@ -4,7 +4,7 @@ label: Claude Code
 provider: Anthropic
 install: npm install -g @anthropic-ai/claude-code (https://claude.com/claude-code)
 
-# On a Mac without a terminal (docs/doctor.md, "A program fetched on a Mac").
+# On a Mac without a terminal (docs/doctor.md, "A program fetched").
 # Anthropic's own installer (https://claude.ai/install.sh) does this and no
 # more: it downloads the binary of the version from downloads.claude.ai,
 # checks it against the sha256 in that version's manifest.json, and runs it

@@ -24,7 +24,7 @@ import (
 
 // The onboarding's offer to install a program that is not on PATH, from the
 // file yardr pins for it (store.Fetch): the steps of docs/doctor.md, "A
-// program fetched on a Mac", done by yardr itself, on a yes, at a terminal.
+// program fetched", done by yardr itself, on a yes, at a terminal.
 // herdr's own installer (https://herdr.dev/install.sh) is never run, nor any
 // script: only the pinned file, once its size and sha256 are those yardr
 // pinned, and then only with its version flag.
@@ -60,7 +60,7 @@ var fetchHTTP = &http.Client{
 // A variable so that no test downloads anything: a test of the offer puts the
 // real one back (realOfferInstall).
 var offerInstall = func(ctx context.Context, w io.Writer, n need) (bool, error) {
-	d := n.download
+	d := n.Fetch
 	if d == nil || !interactive() {
 		return false, nil
 	}
@@ -130,15 +130,14 @@ func pathAdd(dir string) bool {
 }
 
 // installDownload puts the file d pins at d.Path and returns the first line
-// its version flag printed. It follows docs/doctor.md, "A program fetched on a
-// Mac": the file is downloaded and kept in memory, its size and sha256 are
-// compared with the pinned ones, and only a file that matches is written, to
-// a temporary file beside d.Path so that it is run where it will be kept
-// (a temporary directory can be mounted noexec) and moved without leaving the
-// file system. A failure anywhere leaves nothing of the file behind, and
-// nothing at all before the download has proved to be the pinned one; a
-// directory made for it may stay. A file at d.Path is never replaced, not one
-// that appears while this downloads.
+// its version flag printed. It follows docs/doctor.md, "A program fetched": the
+// file is downloaded and kept in memory, its size and sha256 are compared with
+// the pinned ones, and only a file that matches is written, to a temporary file
+// beside d.Path so that it is run where it will be kept (a temporary directory
+// can be mounted noexec) and moved without leaving the file system. A failure
+// anywhere leaves nothing of the file behind, and nothing at all before the
+// download has proved to be the pinned one; a directory made for it may stay. A
+// file at d.Path is never replaced, not one that appears while this downloads.
 //
 // It takes a download that is the program, as herdr's is; one that is a member
 // of an archive, or is run to put the program in place, is for a program that

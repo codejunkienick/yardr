@@ -56,7 +56,7 @@ func TestFetchCheck(t *testing.T) {
 			Targets: map[string]store.FetchFile{
 				"darwin/arm64": {
 					URL: "https://tool.example/1.2.3/tool.tar.gz", SHA256: strings.Repeat("a1", 32), Size: 10, Member: "tool-arm64"},
-				// A Linux box is a system a fetch may name (herdr's, for the onboarding).
+				// A Linux box is a system a fetch may name (herdr's).
 				"linux/amd64": {URL: "https://tool.example/1.2.3/tool-linux", SHA256: strings.Repeat("b2", 32), Size: 10},
 			},
 		}

@@ -174,6 +174,14 @@ func TestDoctorEmptyHome(t *testing.T) {
 	if !errors.Is(err, errCheckFailed) || rep.Yard || rep.State != nil || len(rep.Faults) != 2 || len(rep.Steps) != 1 || rep.Steps[0].Key != stepLimits || rep.Next != nil {
 		t.Fatalf("json: %v %+v", err, rep)
 	}
+	// The command to paste is the one in herdr's get, alone, and only a program
+	// that is missing and has one carries it: git is found, and a harness has
+	// no command of its own.
+	for _, n := range rep.Machine {
+		if want := map[string]string{"herdr": "curl -fsSL https://herdr.dev/install.sh | sh"}[n.Program]; n.Command != want {
+			t.Errorf("%s: command %q, want %q", n.Program, n.Command, want)
+		}
+	}
 	if _, err := os.Stat(filepath.Join(home, "yard.db")); err == nil {
 		t.Fatal("doctor --json created a store")
 	}
@@ -1417,7 +1425,7 @@ func TestPreflightSaysWhereToGet(t *testing.T) {
 	}
 
 	// A command Get does not start with is not taken out of it.
-	if got := (need{Get: "see https://example.com", cmd: "curl example.com"}).getLines(); got != "  Get it: see https://example.com\n" {
+	if got := (need{Get: "see https://example.com", Command: "curl example.com"}).getLines(); got != "  Get it: see https://example.com\n" {
 		t.Errorf("a command that is not in Get: %q", got)
 	}
 

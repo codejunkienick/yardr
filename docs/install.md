@@ -225,7 +225,7 @@ now?`, and yes is the default. On a yes it:
    pins (GitHub's release, which answers with a redirect to GitHub's storage:
    only a redirect to https is followed);
 2. compares its size and its sha256 with the ones yardr pins, which are not
-   read from herdr's site at the time ([doctor.md](doctor.md#a-program-fetched-on-a-mac)
+   read from herdr's site at the time ([doctor.md](doctor.md#a-program-fetched)
    has them and where they were verified from);
 3. writes it to a temporary file in `~/.local/bin`, runs it with `--version`,
    and renames it to `~/.local/bin/herdr`, as `install.sh` does for yardr;

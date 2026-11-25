@@ -10,10 +10,10 @@ const tagCommand = "command"
 // commandLine gives doctor a copyable line for a missing program's installer.
 // The fault keeps its one-line shape, and this line keeps the command easy to copy.
 func (n need) commandLine() []docLine {
-	if n.Found || n.LoginPath != "" || n.cmd == "" {
+	if n.Found || n.LoginPath != "" || n.Command == "" {
 		return nil
 	}
-	return []docLine{{tagCommand, "", n.cmd}}
+	return []docLine{{tagCommand, "", n.Command}}
 }
 
 // printDoctorLine leaves a copyable command by itself instead of adding the

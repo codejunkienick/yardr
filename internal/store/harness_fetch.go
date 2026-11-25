@@ -9,13 +9,13 @@ import (
 	"time"
 )
 
-// Fetch is how a program gets onto a Mac that has no package manager and
+// Fetch is how a program gets onto a machine that has no package manager and
 // nobody at a terminal: one file its maker publishes, at one address, of one
 // version, with the checksum it had when it was verified. yardr fetches
 // nothing itself but herdr, on a yes in its first-run wizard; this is data for
 // a program that does (yardr doctor --json, yardr harness show --json;
-// docs/doctor.md, "A program fetched on a Mac" says what such a program does
-// with it, step by step).
+// docs/doctor.md, "A program fetched" says what such a program does with it,
+// step by step).
 //
 // The version is pinned, and the checksum is yardr's, not read from the
 // maker's site when the file is fetched: a checksum served beside a download
@@ -66,11 +66,9 @@ type Download struct {
 	Verified Verified `json:"verified"`
 }
 
-// fetchTarget is a system a Fetch may name: a Mac, or a Linux box. A Linux
-// target is for yardr's own first-run wizard, which installs herdr from it;
-// doctor's report still carries a Mac's alone, since on Linux a missing
-// program stays a hint to install it by hand for a program that fetches
-// (design yardr-3az6, open question 3).
+// fetchTarget is a system a Fetch may name: a Mac, or a Linux box. Doctor's
+// report gives a program the file of the system it runs on, whichever it is,
+// and no fetch where the program's Fetch names none for it.
 var fetchTarget = regexp.MustCompile(`^(darwin|linux)/(arm64|amd64)$`)
 
 var fetchSHA256Hex = regexp.MustCompile(`^[0-9a-f]{64}$`)

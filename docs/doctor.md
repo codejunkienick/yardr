@@ -22,9 +22,9 @@ for a group's kind; the JSON report uses `harness_always` on a machine item.
 ## Read-only
 
 Doctor installs nothing and changes nothing in the store. Where a program is
-missing it prints where to get it and never runs that; on a Mac its `--json`
-also says how a program that fetches gets it
-([below](#a-program-fetched-on-a-mac)), and doctor fetches nothing itself. It
+missing it prints where to get it and never runs that; where yardr pins a file
+for the system, its `--json` also says how a program that fetches gets it
+([below](#a-program-fetched)), and doctor fetches nothing itself. It
 starts no daemon, no yardr server and no herdr server. What it does do:
 
 - It runs each harness it finds with its version flag (`claude --version`),
@@ -174,7 +174,7 @@ own after the FAULT, so it is easy to copy. yardr never runs it.
 | `FAULT herdr <path>: herdr <version> is older than 0.9.0, the oldest yardr starts agents with. Update it: stop its server if one runs (herdr server stop) and run herdr update` | herdr's version flag names a herdr older than 0.9.0. One that old refuses the flag every start of an agent passes, and says what went wrong in its own words rather than in an error object, so it is not asked for its server: a server of it that is down would look unaskable, not down. herdr refuses to update while a server of it runs. A herdr whose version flag fails, or names no herdr version, is asked for its server as before |
 | `note herdr <path>: on PATH; whether its server is running could not be asked: <what herdr said>` | herdr answered with something else, or not in 5 seconds: not known to be down, so no fault |
 | `FAULT <program> not on PATH: <what it is needed for>. Get it: <where>` | missing. For git and herdr the same words the onboarding uses before its first page, which prints herdr's command on a line of its own where it does not [install herdr](#the-onboarding-installs-herdr) first. For a harness, `<where>` is its install command where yardr knows one (claude, codex, kiro, opencode), else a pointer to the agent's own documentation |
-| `    curl -fsSL https://herdr.dev/install.sh \| sh` | herdr is missing: the installer command from its FAULT, printed on its own line so it can be copied |
+| `    curl -fsSL https://herdr.dev/install.sh \| sh` | herdr is missing: the installer command from its FAULT, printed on its own line so it can be copied. `--json` has the same command alone as `command` |
 | ``FAULT <program> not on PATH: <what it is needed for>. Found at <path> by your login shell, which this shell's PATH does not have: add <dir> to PATH here, or for the daemon's service run `yardr daemon install` from a login shell`` | missing here and installed: your login shell finds it. A shell without a terminal (ssh with a command, a service) reads no profile, so it lacks what `~/.profile` adds, `~/.local/bin` for one. The daemon's service gets the PATH of the shell that installs it ([configuration.md](configuration.md#login-services)) |
 | `FAULT a harness not on PATH: …` | a home with no yard, and no agent herdr starts is installed: a program that [answers as another](#a-program-that-answers-as-another) does not count as one. When the login shell finds claude, codex, grok, kimi, kiro, opencode, pi, muse or agy, the line above is printed for each it finds instead |
 | `ok <harness> <path>, the harness of <who>: answers its version flag (<its first line>)` | found, and it runs |
@@ -433,7 +433,7 @@ For a home other than the default, every command doctor prints is `yardr
 | field | |
 |---|---|
 | `home`, `yard` | the home; whether a yard is set up in it |
-| `machine` | the programs: `program`, `for`, `found` (on PATH and, for a harness whose file says what its version flag must print, that harness: a program that answers it as another is not found, [above](#a-program-that-answers-as-another)), `path` (where it is found; where the program is that answered as another), `get` (when missing, and for the program that answered as another), `login_shell_path` (where the login shell finds one that is missing), `fetch` (on a Mac, for one that is missing and that yardr knows a way for: [below](#a-program-fetched-on-a-mac)), `any_of` (on the item `a harness`, on a Mac: the harnesses that can be fetched, each an item with its `fetch`), `harness` (the kind, for a harness), `label` (the harness's name as people write it, for a harness), `provider` (who makes it, for a harness; absent when the file names none), `harness_file` (the version of yardr's file for the kind; absent when it has none), `harness_login` (true for a kind whose login a program can lead: [below](#a-harnesss-login-led-by-a-program); absent for a kind that is logged in in a terminal), `offers` (the models the kind's file suggests: each a `model` id, a `label`, and what it is `recommended` for; absent when the file names none), `optional` (a harness nothing runs on yet), `version` with `state` (`answers`, `fails`, `hangs`, `not_harness`, `not_checked`) and `output` (the first line it printed; for `not_harness`, what it printed in place of the harness's name); for herdr, `server` with `state` (`running`, `not_running`, `unknown`) and `output` (what herdr said); under `--try`, for a harness, `try` with `state` (`ok`, `fails`, `hangs`, `not_tried`) and `output` (the answer's last line, what it printed, or why it was not tried) |
+| `machine` | the programs: `program`, `for`, `found` (on PATH and, for a harness whose file says what its version flag must print, that harness: a program that answers it as another is not found, [above](#a-program-that-answers-as-another)), `path` (where it is found; where the program is that answered as another), `get` (when missing, and for the program that answered as another), `command` (for a missing program whose `get` starts with a command to paste into a terminal, as herdr's does: that command alone, so that it is copied whole; absent otherwise), `login_shell_path` (where the login shell finds one that is missing), `fetch` (for one that is missing and that yardr pins a file for on this system, a Mac or a Linux box: [below](#a-program-fetched)), `any_of` (on the item `a harness`, on a Mac: the harnesses that can be fetched, each an item with its `fetch`), `harness` (the kind, for a harness), `label` (the harness's name as people write it, for a harness), `provider` (who makes it, for a harness; absent when the file names none), `harness_file` (the version of yardr's file for the kind; absent when it has none), `harness_login` (true for a kind whose login a program can lead: [below](#a-harnesss-login-led-by-a-program); absent for a kind that is logged in in a terminal), `offers` (the models the kind's file suggests: each a `model` id, a `label`, and what it is `recommended` for; absent when the file names none), `optional` (a harness nothing runs on yet), `version` with `state` (`answers`, `fails`, `hangs`, `not_harness`, `not_checked`) and `output` (the first line it printed; for `not_harness`, what it printed in place of the harness's name); for herdr, `server` with `state` (`running`, `not_running`, `unknown`) and `output` (what herdr said); under `--try`, for a harness, `try` with `state` (`ok`, `fails`, `hangs`, `not_tried`) and `output` (the answer's last line, what it printed, or why it was not tried) |
 | `tried` | whether `--try` was given |
 | `state` | `server` (`running`, `not_running`, `unreachable`), `server_error`, `daemon`, `daemon_lost_at` (the daemon's last pass where a `daemon_lost` event stands with no start after it; absent otherwise), `yardmaster` (`name`, `crew`, `enabled`, `running`, `state`, `agent`, `failures`, `reason`), `crew`, `failing`, `login` (the crew at their login screen, each with `name`, `kind` and `line`; absent when there is none), `held`, `cycles` (each a list of ids in blocking order, the first repeated at the end; absent when there is none), `mail` (`user`, `unread`, `from`; only when who runs it is a user), `parties` (the `names` notes), `copied_on` (the `crew` notes on a copied `--on`), `config` (the `config` notes; absent when there is none), `codex_trust` (the `codex` notes; absent when there is none), `kimi_hooks` (the `kimi` notes; absent when there is none), `stale_packs` (the `packs` notes; absent when there is none), `stray_memory` (the `crew` notes on a harness's own memory; absent when there is none); absent with no yard |
 | `steps` | each `key`, `title`, `done`, `detail`, `next` (the command) when not done, `depot` (the depot the command names) once the yard has one, and `optional` (true on a step the setup does not wait for) |
@@ -442,21 +442,24 @@ For a home other than the default, every command doctor prints is `yardr
 | `skipped` | the checks that were not made, on a yard whose server is not running: `yardmaster`, `crew`, `held`, `cycles`, `mail`, `names`, `config`, `codex`, `steps`, `hooks`, `sources`, `peers`, `packs`, `limits`. `state` then holds `server` and `daemon` and nothing that was read, and `steps` is empty. Absent otherwise |
 | `faults` | the `FAULT` lines, one string each; empty when the exit status is 0 |
 
-## A program fetched on a Mac
+## A program fetched
 
 A Mac as it comes has no npm and no Homebrew, and the person a window such
 as footplate sets a yard up for has no terminal open. So for a program that
-is missing, `yardr doctor --json` says on macOS how a program can fetch it
-with nothing but the Mac: one file its maker publishes, of one version, with
-the checksum it had when yardr's data was verified. Doctor fetches nothing
-itself. This is data for a program that does, and for one fetch of yardr's
-own: [the onboarding](#the-onboarding-installs-herdr) installs herdr from it,
-on a yes.
+is missing, `yardr doctor --json` says how a program can fetch it with nothing
+but the machine: one file its maker publishes, of one version, with the
+checksum it had when yardr's data was verified. It says so on macOS and on
+Linux, on arm64 and amd64, wherever yardr pins a file for that system and
+architecture: herdr has one for each of the four, and a harness has files for
+a Mac alone. Doctor fetches nothing itself. This is data for a program that
+does, and for one fetch of yardr's own: [the onboarding](#the-onboarding-installs-herdr)
+installs herdr from it, on a yes.
 
 ```json
 {
   "program": "herdr", "found": false,
   "get": "curl -fsSL https://herdr.dev/install.sh | sh (more: https://herdr.dev)",
+  "command": "curl -fsSL https://herdr.dev/install.sh | sh",
   "fetch": {
     "version": "0.9.4",
     "url": "https://github.com/herdrdev/herdr/releases/download/v0.9.4/herdr-macos-aarch64",
@@ -468,10 +471,15 @@ on a yes.
 }
 ```
 
+The item has the hint for a person (`get`), the command in it alone, for a
+program that offers it to be copied (`command`), and the file for a program
+that fetches (`fetch`); each is there only where the program has it. `fetch`
+has:
+
 | field | |
 |---|---|
 | `version` | the program's version the file is of |
-| `url` | the file, at its maker's own address, for this machine (Apple silicon or Intel). The address names the version, so the file at it does not change; it may answer with a redirect to the maker's storage |
+| `url` | the file, at its maker's own address, for this machine (Apple silicon or Intel, or a Linux box of either architecture). The address names the version, so the file at it does not change; it may answer with a redirect to the maker's storage |
 | `sha256`, `size` | what the file must have. They are yardr's, written down when the way was verified, and not read from the maker's site at the time of the fetch: a checksum served beside a download shows that it is whole, not who made it |
 | `member` | present when the file is a gzipped tar: the name of its one member that is the program. Absent when the file is the program |
 | `run` | present when the program is put in place by its maker's own install command: the arguments to run the fetched file with. Absent when the file itself is the program to keep |
@@ -504,19 +512,18 @@ update`, Claude Code's own updates in the background, `codex update`.
 
 | program | what is fetched | verified from, and on |
 |---|---|---|
-| herdr 0.9.4 | the release's binary for the Mac, moved to `~/.local/bin/herdr`; for a Linux box too, which only [the onboarding](#the-onboarding-installs-herdr) uses | on 2026-11-05: <https://herdr.dev/docs/install/>, "Download manually"; the checksums are those of <https://herdr.dev/latest.json>, and each of the four files (Mac and Linux, arm64 and amd64) was downloaded that day and found to be of the size and sum pinned. The Linux files are static executables. herdr publishes no signature and its binaries are signed ad hoc, by no Developer ID: the checksum here is all that says the file is the one that was verified |
+| herdr 0.9.4 | the release's binary for the system, a Mac or a Linux box, moved to `~/.local/bin/herdr` | on 2026-11-05: <https://herdr.dev/docs/install/>, "Download manually"; the checksums are those of <https://herdr.dev/latest.json>, and each of the four files (Mac and Linux, arm64 and amd64) was downloaded that day and found to be of the size and sum pinned. The Linux files are static executables. herdr publishes no signature and its binaries are signed ad hoc, by no Developer ID: the checksum here is all that says the file is the one that was verified |
 | Claude Code 2.1.296 | the release's binary, run with `install 2.1.296`, which puts the launcher at `~/.local/bin/claude` | on 2026-10-13: <https://code.claude.com/docs/en/setup>, "Binary integrity and code signing", and Anthropic's own installer (<https://claude.ai/install.sh>), which does the same two things; the checksums are those of the version's `manifest.json`, which Anthropic signs. The binaries are signed by Developer ID Application: Anthropic PBC (Q6L2SF6YDW). `install` needs the network and downloads the version once more itself: the checksum here is of the installer that is run, and what ends at `path` is Anthropic's own download of that version |
 | Codex 0.162.1 | the archive the README names for a Mac, whose one member is moved to `~/.local/bin/codex` | on 2026-10-13: <https://github.com/openai/codex/blob/main/README.md>; the checksums are the digests of <https://releases.openai.com/codex/channels/latest>. The binaries are signed by Developer ID Application: OpenAI OpCo, LLC (2DC432GLL2). It is the README's binary alone, without what OpenAI's installer puts beside it |
 
 git has no `fetch`: on a Mac it is always `xcode-select --install`, Apple's
 own dialog. agy, muse, opencode, grok, kimi, kiro, pi and every kind with no harness
 file have none either, because no way of theirs was verified: an item with no
-`fetch` is a program installed by hand, and its `get` says where. On Linux
-no item has a `fetch` or an `any_of`, whatever the program: there is no one
-way to install without a terminal there for a program that fetches, so every
-missing program keeps its `get`. herdr's file for a Linux box is no part of
-the report; [the onboarding](#the-onboarding-installs-herdr) alone installs
-from it.
+`fetch` is a program installed by hand, and its `get` says where. A `fetch` is
+given where a file is pinned for the system and architecture doctor runs on,
+and only there: herdr has one on a Mac and on a Linux box, but no harness has a
+file for Linux, so on Linux a missing harness has no `fetch`, `any_of` is
+absent, and every missing program but herdr keeps its `get` alone.
 
 On a home with no yard and no harness installed, the machine has one item
 for the harness, `a harness`. On a Mac it carries `any_of`: an item for each

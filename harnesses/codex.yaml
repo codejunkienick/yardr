@@ -4,7 +4,7 @@ label: Codex
 provider: OpenAI
 install: npm install -g @openai/codex
 
-# On a Mac without a terminal (docs/doctor.md, "A program fetched on a Mac").
+# On a Mac without a terminal (docs/doctor.md, "A program fetched").
 # Codex's README names these archives for a Mac: "Each archive contains a
 # single entry with the platform baked into the name ..., so you likely want
 # to rename it to `codex` after extracting it." ~/.local/bin is where

@@ -34,7 +34,8 @@ import (
 // cmd is the one command in get that a person pastes into a terminal, "" where
 // there is none. get starts with it, so that the places that print get on one
 // line carry the command, and the onboarding can take it out of get and print
-// it on a line of its own, where it is copied whole.
+// it on a line of its own, where it is copied whole. doctor --json gives it
+// alone as the item's command, for a program that offers it to be copied.
 var requirements = []struct {
 	exe, need, get, cmd string
 	fetch               *store.Fetch
@@ -53,9 +54,9 @@ var requirements = []struct {
 // to do, who is given its page beside it to read first.
 const herdrInstall = "curl -fsSL https://herdr.dev/install.sh | sh"
 
-// herdrFetch is herdr as yardr puts it on a machine: on a Mac without a
-// terminal (docs/doctor.md, "A program fetched on a Mac"), and, on a yes, by
-// the first-run wizard on a Mac or a Linux box (offerInstall). herdr's
+// herdrFetch is herdr as yardr puts it on a machine: for a program that
+// fetches it, on a Mac or a Linux box (docs/doctor.md, "A program fetched"),
+// and, on a yes, by the first-run wizard (offerInstall). herdr's
 // install page has it under "Download manually": the release's binary for
 // the system, made executable and moved to ~/.local/bin/herdr, which is also
 // where herdr's own installer (https://herdr.dev/install.sh) puts it, and
@@ -114,19 +115,15 @@ type need struct {
 	Path string `json:"path,omitempty"`
 	// Get is where to get it, when it is not found.
 	Get string `json:"get,omitempty"`
-	// cmd is the command in Get that a person pastes into a terminal, "" when
-	// there is none (see requirements). It is no field of the report: a
-	// program that reads Get has the command in it.
-	cmd string
-	// Fetch is how a program that fetches gets it, when it is not found, on
-	// a Mac, and yardr knows a way (see fetchFor). With none it is installed
-	// by hand, as Get says.
+	// Command is the command in Get that a person pastes into a terminal,
+	// alone so that a program that shows it can offer it to be copied whole;
+	// "" when there is none (see requirements).
+	Command string `json:"command,omitempty"`
+	// Fetch is how a program that fetches gets it, when it is not found and
+	// yardr pins a file for this system and architecture (see downloadFor).
+	// With none it is installed by hand, as Get says. It is also the file the
+	// onboarding offers to install herdr from (offerInstall).
 	Fetch *store.Download `json:"fetch,omitempty"`
-	// download is the file the onboarding offers to install when the program
-	// is not found: Fetch's, and on a Linux box where a target is pinned for
-	// one (see downloadFor). It is no field of the report, whose Fetch is a
-	// Mac's alone.
-	download *store.Download
 	// AnyOf, on the line that says no harness is installed, are the
 	// harnesses that can be fetched here: any one of them answers it.
 	AnyOf []need `json:"any_of,omitempty"`
@@ -244,9 +241,9 @@ type harnessUse struct {
 func basicNeeds() []need {
 	var out []need
 	for _, r := range requirements {
-		n := need{Program: r.exe, For: r.need, Get: r.get, cmd: r.cmd, Fetch: fetchFor(r.fetch), download: downloadFor(r.fetch)}
+		n := need{Program: r.exe, For: r.need, Get: r.get, Command: r.cmd, Fetch: downloadFor(r.fetch)}
 		if p, err := lookPath(r.exe); err == nil {
-			n.Found, n.Path, n.Get, n.cmd, n.Fetch, n.download = true, p, "", "", nil, nil
+			n.Found, n.Path, n.Get, n.Command, n.Fetch = true, p, "", "", nil
 		}
 		out = append(out, n)
 	}
@@ -274,7 +271,7 @@ func missingHarness(kind, what string) need {
 		n.Label = h.Label
 		n.Provider = h.Provider
 		n.Offers = h.Offers
-		n.Fetch = fetchFor(h.Fetch)
+		n.Fetch = downloadFor(h.Fetch)
 	}
 	return n
 }
@@ -297,8 +294,8 @@ func (n need) fileNote() string {
 // copied whole, under what Get says besides it (where to read more); without
 // one, or where Get does not start with it, the line is Get as it is.
 func (n need) getLines() string {
-	if rest, ok := strings.CutPrefix(n.Get, n.cmd); ok && n.cmd != "" {
-		return fmt.Sprintf("  Get it with this command%s:\n\n    %s\n", rest, n.cmd)
+	if rest, ok := strings.CutPrefix(n.Get, n.Command); ok && n.Command != "" {
+		return fmt.Sprintf("  Get it with this command%s:\n\n    %s\n", rest, n.Command)
 	}
 	return "  Get it: " + n.Get + "\n"
 }
@@ -310,22 +307,11 @@ func onPath(kind string) bool {
 	return err == nil
 }
 
-// fetchFor is f for this machine and this user, as doctor's report says it:
-// nil off a Mac, where a program that fetches has no one way and a missing
-// program stays a hint to install it by hand, and nil when the home is not
-// known.
-func fetchFor(f *store.Fetch) *store.Download {
-	if goos != "darwin" {
-		return nil
-	}
-	return downloadFor(f)
-}
-
-// downloadFor is f for this machine and this user whatever the system, where
-// a target is pinned for it: what the onboarding installs from (offerInstall).
-// Doctor's report is not given a Linux box's file by it, since a program that
-// reads that report fetches by what it says, and footplate installs nothing on
-// Linux (design yardr-3az6, open question 3).
+// downloadFor is f for this machine and this user, as doctor's report says it
+// and as the onboarding installs from it (offerInstall): a fetch is given where
+// a target is pinned for this system and architecture, on any system. It is
+// nil where none is, and when the home is not known. A harness's file pins
+// Macs alone, so on Linux a missing harness stays a hint to install it by hand.
 func downloadFor(f *store.Fetch) *store.Download {
 	home, err := userHomeDir()
 	if err != nil {
