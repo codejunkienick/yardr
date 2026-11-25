@@ -71,6 +71,59 @@ func TestDepotAddDetectsKind(t *testing.T) {
 	}
 }
 
+// Without --base a git depot takes origin's default branch as its checkout
+// has it, so a clone of a repository whose default is not main registers
+// with no one naming the branch; a checkout that names none keeps
+// origin/main, and --base wins over both.
+func TestDepotAddDefaultBase(t *testing.T) {
+	t.Parallel()
+	st := storetest.New(t)
+	ctx := context.Background()
+	a := &app{st: st, actor: "me"}
+	git := func(dir string, args ...string) {
+		t.Helper()
+		if out, err := exec.Command("git", append([]string{"-C", dir, "-c", "user.name=t", "-c", "user.email=t@example.com"}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	// upstream is a repository whose default branch is trunk, with a main
+	// beside it that is not the default.
+	upstream := t.TempDir()
+	git(upstream, "init", "-q", "-b", "trunk")
+	git(upstream, "commit", "-q", "--allow-empty", "-m", "init")
+	git(upstream, "branch", "main")
+	base := func(name string) string {
+		t.Helper()
+		r, err := st.GetDepot(ctx, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r.Base
+	}
+
+	clone := filepath.Join(t.TempDir(), "web")
+	out, err := run(t, a.depotCmd(), "add", "web", clone, "--clone", upstream)
+	if err != nil || !strings.Contains(out, "(git, base origin/trunk)") || base("web") != "origin/trunk" {
+		t.Fatalf("a clone with no --base: %q, %v; base %q, want origin/trunk", out, err, base("web"))
+	}
+	// The same checkout registered again, as a clone made by hand is.
+	if _, err = run(t, a.depotCmd(), "add", "again", clone); err != nil || base("again") != "origin/trunk" {
+		t.Fatalf("an existing clone with no --base: %v; base %q, want origin/trunk", err, base("again"))
+	}
+	if _, err = run(t, a.depotCmd(), "add", "given", clone, "--base", "origin/main"); err != nil || base("given") != "origin/main" {
+		t.Fatalf("--base on a clone: %v; base %q, want origin/main", err, base("given"))
+	}
+	// A checkout that no longer says which branch is origin's default.
+	git(clone, "remote", "set-head", "origin", "--delete")
+	if _, err = run(t, a.depotCmd(), "add", "unnamed", clone); err != nil || base("unnamed") != "origin/main" {
+		t.Fatalf("a checkout with no origin/HEAD: %v; base %q, want origin/main", err, base("unnamed"))
+	}
+	// One with no remote at all is refused as before, naming what it tried.
+	if _, err = run(t, a.depotCmd(), "add", "local", upstream); err == nil || !strings.Contains(err.Error(), `base "origin/main" does not resolve`) || !strings.Contains(err.Error(), "pass --base") {
+		t.Fatalf("a checkout with no remote and no --base: %v", err)
+	}
+}
+
 // An open bead in a stage its flow lost on the base is named by flow show,
 // under the flow that lacks the stage, with the command that moves it, and
 // no longer once it is advanced to a stage the flow has. So is one that

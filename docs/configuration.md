@@ -234,9 +234,21 @@ git repository, register an existing clone, or let yardr clone it:
 ```sh
 yardr depot add webapp ~/projects/webapp                       # existing clone
 yardr depot add webapp --clone git@github.com:me/webapp.git    # → ~/.yardr/depots/webapp
-yardr depot add legacy ~/src/legacy --base origin/master       # base must resolve
+yardr depot add legacy ~/src/legacy --base origin/release      # base must resolve
 yardr depot rm legacy                                          # store only; the clone stays
 ```
+
+Without `--base`, a git depot's base is origin's default branch as the
+checkout has it: `refs/remotes/origin/HEAD`, which `git clone` sets from what
+the remote answers, so a repository whose default branch is `master` or
+`trunk` is registered as `origin/master` or `origin/trunk` with no one
+naming it. A checkout that names none (a clone made with `git init` and
+`git remote add`, or one whose `origin/HEAD` was deleted) gets `origin/main`,
+as every depot did before. The ref is read and nothing is fetched: where the
+remote changed its default branch since the clone, `git remote set-head
+origin --auto` brings the checkout up to it, and `--base` says another
+branch outright. A base that does not resolve is refused, naming the
+branches that would: a repository with no commit has none.
 
 Bead branches (`yard/<bead>`) start from the depot's base, brought up to its
 remote before each new worktree: a local base is fast-forwarded to its

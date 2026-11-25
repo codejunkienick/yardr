@@ -249,12 +249,14 @@ func (a *app) depotCmd() *cobra.Command {
 branches in worktrees and land on its --base. A dir depot is a plain directory
 (documents, images, invoices): beads are worked in it as it is, and it has no
 base. Without --kind, a path git sees as a checkout is a git depot and any
-other directory a dir depot; depot add says which it took. Only the operator
+other directory a dir depot; depot add says which it took. Without --base, a
+git depot's base is origin's default branch as the checkout has it
+(origin/HEAD, which git clone sets), else origin/main. Only the operator
 adds a depot or changes an existing depot's path, base or test command.`,
 		Example: `  yardr depot add webapp ~/projects/webapp                 # existing clone
   yardr depot add invoices ~/Documents/invoices --kind dir # a folder, no git
   yardr depot add webapp --clone git@github.com:me/webapp.git   # clones to ~/.yardr/depots/webapp
-  yardr depot add legacy ~/src/legacy --base origin/master
+  yardr depot add legacy ~/src/legacy --base origin/release
   yardr depot add webapp ~/projects/webapp --test 'make test'    # what tests it, for agents and scripts`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(c *cobra.Command, args []string) error {
@@ -320,13 +322,8 @@ adds a depot or changes an existing depot's path, base or test command.`,
 			} else if top, real := strings.TrimSpace(string(out)), resolve(path); top != real {
 				return fmt.Errorf("%s is inside the repository at %s; register the top level (or --kind dir)", path, top)
 			}
-			// Branches for beads start from base, so it has to resolve.
-			if _, err := store.ResolveRef(context.Background(), path, base+"^{commit}"); err != nil {
-				refs, _ := exec.Command("git", "-C", path, "for-each-ref", "--format=%(refname:short)",
-					"refs/remotes/origin/HEAD", "refs/remotes/origin/main", "refs/remotes/origin/master",
-					"refs/heads/main", "refs/heads/master").Output()
-				return fmt.Errorf("base %q does not resolve in %s (found: %s); pass --base",
-					base, path, strings.Join(strings.Fields(string(refs)), ", "))
+			if base, err = addBase(c.Context(), path, base); err != nil {
+				return err
 			}
 			r := store.Depot{Name: name, Path: path, Kind: store.DepotGit, Base: base, Test: test}
 			if err := st.PutDepot(c.Context(), r, a.who()); err != nil {
@@ -340,7 +337,7 @@ adds a depot or changes an existing depot's path, base or test command.`,
 			})
 		},
 	}
-	add.Flags().StringVar(&base, "base", "origin/main", "ref bead branches start from (git depots)")
+	add.Flags().StringVar(&base, "base", "", "ref bead branches start from (git depots; default: origin's default branch as the checkout has it, else origin/main)")
 	add.Flags().StringVar(&kind, "kind", "", "git or dir (default: git when the path is a git checkout, else dir)")
 	add.Flags().StringVar(&clone, "clone", "", "clone this URL first (into [path] or ~/.yardr/depots/<name>)")
 	add.Flags().StringVar(&test, "test", "", "the command that tests the project (sh -c): yardr never runs it; a bead's prime prints it and a script group gets it as YARDR_TEST")

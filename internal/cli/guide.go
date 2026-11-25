@@ -482,7 +482,8 @@ func (g *guide) depotPage(ctx context.Context, _ setupStep) (bool, error) {
 	base := ""
 	if isGit {
 		// The branch checked out is a local one, which an assembly can land
-		// on; depot add's own default, origin/main, it cannot.
+		// on; depot add's own default, origin's default branch (origin/main
+		// where the checkout names none), it cannot.
 		if base, _ = git(ctx, path, "symbolic-ref", "--short", "-q", "HEAD"); base == "" {
 			base = "origin/main"
 		}
