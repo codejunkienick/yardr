@@ -218,12 +218,15 @@ func HomeStageFile(home, flow, stage string) (*StageFile, error) {
 // HomeStageFiles looks at the stage files of store flow f in the yard's
 // home: have maps each stage that has one to its path, and stray names, as
 // "<path>: <why>", the markdown files in the flow's directory named after
-// no stage of it, which nobody would be shown.
+// no stage of it and not the file of one, which nobody would be shown.
 func HomeStageFiles(home string, f *Flow) (have map[string]string, stray []string, err error) {
 	have = map[string]string{}
 	if home == "" || !validFlowName.MatchString(f.Name) {
 		return have, nil, nil
 	}
+	// haveInfo is what each file in have is on disk, to tell a second name for
+	// one of them from a stray.
+	var haveInfo []fs.FileInfo
 	for _, st := range f.Stages {
 		sf, err := HomeStageFile(home, f.Name, st)
 		if err != nil {
@@ -231,6 +234,12 @@ func HomeStageFiles(home string, f *Flow) (have map[string]string, stray []strin
 		}
 		if sf != nil {
 			have[st] = sf.Path
+			// A file that went since it was read leaves nothing to compare with.
+			if fi, err := os.Stat(sf.Path); err == nil {
+				haveInfo = append(haveInfo, fi)
+			} else if !errors.Is(err, fs.ErrNotExist) {
+				return nil, nil, fmt.Errorf("stage file of %s in flow %s: %w", st, f.Name, err)
+			}
 		}
 	}
 	dir := HomeStageDir(home, f.Name)
@@ -246,6 +255,16 @@ func HomeStageFiles(home string, f *Flow) (have map[string]string, stray []strin
 			return err
 		}
 		if stage := strings.TrimSuffix(filepath.ToSlash(rel), ".md"); !slices.Contains(f.Stages, stage) {
+			// A stage's file is the file it reads, whatever its entry is called: a
+			// volume that folds case reads review.md from an entry named Review.md,
+			// and a hard link is one file under two names. Comparing names without
+			// case would be wrong on a volume that keeps case, where Review.md can
+			// be a second file that no stage reads. A file that cannot be examined
+			// (a link to nothing) is not shown to be a stage's, so it is named: this
+			// list warns, and must not fail the listing.
+			if fi, err := os.Stat(p); err == nil && slices.ContainsFunc(haveInfo, func(h fs.FileInfo) bool { return os.SameFile(fi, h) }) {
+				return nil
+			}
 			stray = append(stray, fmt.Sprintf("%s: flow %s has no stage %s; stages: %s", p, f.Name, stage, strings.Join(f.Stages, ", ")))
 		}
 		return nil

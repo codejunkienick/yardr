@@ -254,6 +254,15 @@ func TestHomeStageFiles(t *testing.T) {
 		"flows/other/new.md":     "another flow's",
 		"secret.md":              "outside the flows",
 	})
+	// A second name for a stage's file is no second file, so no stray. A link
+	// to nothing is the file of no stage, so a stray, and does not fail the
+	// listing.
+	if err := os.Link(filepath.Join(home, "flows/code/new.md"), filepath.Join(home, "flows/code/linked.md")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("nowhere.md", filepath.Join(home, "flows/code/dangling.md")); err != nil {
+		t.Fatal(err)
+	}
 	code := &store.Flow{Name: "code", Stages: []string{"new", "review", "qa/smoke", "shipped", "../../secret"}}
 	sf, err := store.HomeStageFile(home, "code", "new")
 	if err != nil || sf == nil || sf.Text != "Build it.\n" || sf.Path != filepath.Join(home, "flows/code/new.md") {
@@ -276,11 +285,31 @@ func TestHomeStageFiles(t *testing.T) {
 	if err != nil || !maps.Equal(have, want) {
 		t.Fatalf("have = %v, %v; want %v", have, err, want)
 	}
-	if len(stray) != 1 || stray[0] != filepath.Join(home, "flows/code/reveiw.md")+": flow code has no stage reveiw; stages: new, review, qa/smoke, shipped, ../../secret" {
-		t.Fatalf("stray = %q", stray)
+	const listed = "; stages: new, review, qa/smoke, shipped, ../../secret"
+	wantStray := []string{ // in the order the directory is walked
+		filepath.Join(home, "flows/code/dangling.md") + ": flow code has no stage dangling" + listed,
+		filepath.Join(home, "flows/code/reveiw.md") + ": flow code has no stage reveiw" + listed,
+	}
+	if !slices.Equal(stray, wantStray) {
+		t.Fatalf("stray = %q; want %q", stray, wantStray)
 	}
 	// A flow with no directory in the home has none, and nothing stray.
 	if have, stray, err = store.HomeStageFiles(home, &store.Flow{Name: "bare", Stages: []string{"new"}}); err != nil || len(have)+len(stray) != 0 {
 		t.Fatalf("no directory: %v %v %v", have, stray, err)
+	}
+	// What the stage file is called is the volume's to say. Where it folds
+	// case, Review.md is the file stage review reads; where it keeps case,
+	// Review.md is a separate stray beside the stage's file.
+	volumeHome := t.TempDir()
+	writeFiles(t, volumeHome, map[string]string{"flows/web/Review.md": "Look it over.\n"})
+	review := filepath.Join(volumeHome, "flows/web/review.md")
+	var volumeStray []string
+	if _, err := os.Stat(review); err != nil {
+		writeFiles(t, volumeHome, map[string]string{"flows/web/review.md": "Look it over again.\n"})
+		volumeStray = []string{filepath.Join(volumeHome, "flows/web/Review.md") + ": flow web has no stage Review; stages: review"}
+	}
+	have, stray, err = store.HomeStageFiles(volumeHome, &store.Flow{Name: "web", Stages: []string{"review"}})
+	if want := map[string]string{"review": review}; err != nil || !maps.Equal(have, want) || !slices.Equal(stray, volumeStray) {
+		t.Fatalf("volume case: have = %v, stray = %q, %v; want %v and %q", have, stray, err, want, volumeStray)
 	}
 }
