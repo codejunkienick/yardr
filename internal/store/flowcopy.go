@@ -62,14 +62,22 @@ type CopiedFlows struct {
 // naming who uses it. From a session's or a crew member's pane the write is
 // recorded as that session's actor or that crew member, whatever actor says
 // (paneAuthor).
-func (s *Store) CopyRepoFlows(ctx context.Context, depot, actor string) (*CopiedFlows, error) {
+//
+// A copy is weighty code, as the card of the same name is: a call that does not
+// say its person saw that (weighed) is refused first, before the repository is
+// read or anything is written. A paired device of the operator makes the call,
+// and what it writes is marked with the device (writeVia), as an approval's is.
+func (s *Store) CopyRepoFlows(ctx context.Context, depot, actor string, weighed bool) (*CopiedFlows, error) {
+	if err := weighedWriteRefusal("copying a depot's repository flows", weighed); err != nil {
+		return nil, err
+	}
 	// Read before the transaction: git must not run inside one.
 	repo, err := s.RepoFlows(ctx, depot)
 	if err != nil {
 		return nil, err
 	}
 	var out *CopiedFlows
-	err = s.write(func(w *wtx) error {
+	err = s.writeVia(ctx, func(w *wtx) error {
 		resolved, err := paneAuthor(w.Tx, callerOf(ctx), actor)
 		if err != nil {
 			return err

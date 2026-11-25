@@ -76,7 +76,10 @@ one, and the refusal names the path.`,
 				return err
 			}
 			flow, stage := args[0], args[1]
-			sf, err := st.PutStageFile(c.Context(), flow, stage, string(raw), digest, a.who())
+			// A terminal has no second gate to pass: the command is the
+			// person's choice to save, so it says weighed. What holds the write
+			// to the operator is the store, whoever types the command.
+			sf, err := st.PutStageFile(c.Context(), flow, stage, string(raw), digest, a.who(), true)
 			if err != nil {
 				return err
 			}

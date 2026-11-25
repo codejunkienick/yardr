@@ -51,14 +51,14 @@ import (
 // it fit to stand on a port that may face the internet:
 //
 //   - only the calls of Calls, by name: every other method of the store, and
-//     the array form yardr's own builds use, is answered as not there. Ten of
-//     OperatorCalls are there besides, for a device of an operator and nobody
-//     else: GiveSecret, ApproveAsk, ApproveSetup, SourceGrants, SessionScreen,
-//     Line, Teammates, UninviteTeammate, TelemetryShow and TelemetrySet
-//     (operatorCall), and GiveSecret for a device of a user whose own address
-//     or credential is asked for (ownSecret). The other four, DevicePairOpen,
-//     DevicePairState, DevicePairClose and Prime, are the socket's alone, not
-//     there for any device (socketOnly): none opens a pairing or reads a role;
+//     the array form yardr's own builds use, is answered as not there. Twelve
+//     of OperatorCalls are there besides, for a device of an operator alone:
+//     GiveSecret, ApproveAsk, ApproveSetup, SourceGrants, SessionScreen, Line,
+//     Teammates, UninviteTeammate, TelemetryShow, TelemetrySet, PutStageFile
+//     and CopyRepoFlows (operatorCall), and GiveSecret for a device of a user
+//     whose own address or credential is asked for (ownSecret). The other
+//     four, DevicePairOpen, DevicePairState, DevicePairClose and Prime, are
+//     the socket's alone (socketOnly): none opens a pairing or reads a role;
 //   - every call is made as the user the credential resolves to (asUser);
 //   - Settings answers the keys of the store's device settings and no
 //     other, and the stream carries the value of a setting_changed for
@@ -888,7 +888,7 @@ func (u *UserServer) call(w http.ResponseWriter, r *http.Request) {
 	// operator call is judged before its body is read.
 	overLink := operators && (name == "GiveSecret" || name == "ApproveSetup") && r.RemoteAddr == linkRemoteAddr
 	if operators && !overLink {
-		if why := inTheClear(r, name, u.routerAddr(r.Context()), false, false, false); why != "" {
+		if why := u.operatorInTheClear(r, name); why != "" {
 			writeJSON(w, reply{Error: toWire(errors.New(why))})
 			return
 		}

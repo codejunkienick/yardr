@@ -202,7 +202,7 @@ A project that names no depot (nothing is filed, and the refusal lists the perso
 POST /call/FileBead
 {"title":"Water the allotment","project":"storage","actor":"jo"}
 
-{"error":{"code":"error","message":"I don't know which of your projects this belongs to. Your projects are: drafts, linegit, notes, yard. Tell me which one you mean, and I'll file it there"}}
+{"error":{"code":"error","message":"I don't know which of your projects this belongs to. Your projects are: drafts, kit, linegit, notes, yard. Tell me which one you mean, and I'll file it there"}}
 ```
 
 A request the caller did not file (nothing is changed, and the refusal says nothing of whether such work exists):
@@ -388,13 +388,13 @@ A crew member acknowledged its inbox through at least one non-mail delivery, suc
 
 ```json
 {
-  "seq": 284,
+  "seq": 296,
   "kind": "inbox_read",
   "actor": "signalman",
   "data": {
     "reader": "signalman",
     "session": "",
-    "through": 282
+    "through": 294
   },
   "at": "2026-10-08T09:30:00Z"
 }
@@ -416,13 +416,13 @@ The yard typed an inbox line into a crew member's pane and advanced its notified
 
 ```json
 {
-  "seq": 283,
+  "seq": 295,
   "kind": "inbox_shown",
   "actor": "signalman",
   "data": {
     "reader": "signalman",
     "session": "",
-    "through": 282
+    "through": 294
   },
   "at": "2026-10-08T09:30:00Z"
 }
@@ -885,13 +885,16 @@ nothing else. What is not the same:
   `ApproveAsk` and `ApproveSetup` are the calls on the listener that have
   the operator's commands run: the command of a run ask, which is one of a
   fixed list ([users.md](users.md#devices) has them, row by row), and the
-  apply, account and grants of a setup.
+  apply, account and grants of a setup. `PutStageFile` and `CopyRepoFlows`
+  change what every bead of a flow is shown, a stage file and a copy of a
+  depot's flows, and the listener holds them to an approval's rule.
 - **Arguments by name only.** The array yardr's own builds send is refused.
 - **Every call is made as the device's user.** The `name` of `GetUser`, the
   inbox calls, `UserAsks`, `UserOpenAsks` and `Waiting`, and the `actor` of `Mail`, `MailPeer`,
   `AnswerAsk`, `DeferAsk`, `DeclineAsk`, their three guarded writes,
   `TakeBackAsk`, `AddNote`, `MoveBead`,
-  `GiveSecret`, `ApproveAsk`, `ApproveSetup` and `TelemetrySet`, may be left out: the yard fills in the user. One that names anyone else is refused with the
+  `GiveSecret`, `ApproveAsk`, `ApproveSetup`, `TelemetrySet`, `PutStageFile`
+  and `CopyRepoFlows`, may be left out: the yard fills in the user. One that names anyone else is refused with the
   code `error` (`this device calls as jo: "actor" is jo or left out, not
   yardmaster`). One side of `Conversation` is the user: `a` left out is the
   user, and a conversation between two others is refused. So `GetUser`
@@ -1390,15 +1393,18 @@ address that is `http://` unless its host is loopback** (`127.0.0.1`, `::1`,
 reads (mode 0600) or in the system's key store, never in a settings file.
 
 A secret, an approval, the grant list, the teammates list, a removal
-filing, a session's screen, a depot's line and the telemetry switch are what the yard holds
+filing, a session's screen, a depot's line, the telemetry switch, a stage
+file's save and a copy of a depot's flows are what the yard holds
 to this itself, as far as it can see.
 [`GiveSecret`, `ApproveAsk`, `ApproveSetup`, `SourceGrants`, `Teammates`,
-`UninviteTeammate`, `SessionScreen`, `Line`, `TelemetryShow` and
-`TelemetrySet`](#for-the-operator-alone) are taken only from a request
+`UninviteTeammate`, `SessionScreen`, `Line`, `TelemetryShow`, `TelemetrySet`,
+`PutStageFile` and `CopyRepoFlows`](#for-the-operator-alone) are taken only from a request
 that reached the listener from the yard's own machine, where the proxy or
 tunnel that ends TLS stands (or a client on that machine) — the two
 approvals, `SessionScreen`, `Line` and the teammates calls also down the link from
-the edge, and `GiveSecret` there for every secret on a hosted yard and, on any
+the edge, `PutStageFile` and `CopyRepoFlows` there on a hosted yard and, on any
+other, when the call came sealed, and `GiveSecret` there for every secret on a
+hosted yard and, on any
 other, for every secret when the call came sealed from the operator's device and
 for the code of a harness login alone when it came plain, and on either from a
 member's own device the code of their own sign-in when the call came sealed and
@@ -1423,7 +1429,17 @@ the screen carries, and crosses the link as an approval does. A depot's line
 carries a group's `cmd` and its prompts whole, so `Line` is held to the rule
 for what the line carries, and crosses the link as an approval does. The teammates
 list and a removal filing hold none either and approve nothing; they are held
-to the rule for the same reason, and cross the link as an approval does. The
+to the rule for the same reason, and cross the link as an approval does. A
+save of a stage file and a copy of a depot's flows hold no secret and approve
+nothing, but they write what every bead of a flow is then shown, and the
+operator's device token goes with the request. They are held to the rule for
+that reason. Down the link from the edge a hosted yard takes them, since its
+service runs the edge. Any other yard takes them only when the call came
+sealed: the edge reads the token of a plain call, and with it could rewrite
+what the yard's agents are told. A plain call there is refused. The refusal
+names the two fixes, a sealed device (pairing the device with the QR makes one)
+and the yard's own machine, and says the token crossed in plain, so the device
+is to be removed and added again (`yardr user device rm`). The
 telemetry preview and switch follow the grant list's rule: neither crosses
 the yard link, the preview may be read from the router's peer over https, and
 the switch cannot be changed there, as approvals cannot. The hosted browser
@@ -1535,9 +1551,10 @@ when the request says it came to the router over https
 peer. The header is read for a yes here, as it is read for a no from the
 yard's own machine: without it, or saying anything but https, the call is
 refused as from any other machine. From the router's peer `ApproveAsk`,
-`ApproveSetup` and `TelemetrySet` are refused as from anywhere else: down
-the link from the edge the approvals are taken, from the router never, and
-the switch is changed from neither.
+`ApproveSetup`, `TelemetrySet`, `PutStageFile` and `CopyRepoFlows` are refused
+as from anywhere else: down the link from the edge the approvals are taken,
+and the save and the copy as above, from the router never, and the switch is
+changed from neither.
 
 Where a proxy stands in front for devices alone, let it pass `/user/` and
 nothing more: the listener also serves `/hooks/` and `/peers/`. A header a
@@ -7766,7 +7783,7 @@ operator's alone to make. An operator is a user whose role is `operator`
 there may be several, and each of them makes these calls. The `operator`
 setting names one of them, the one an ask with no `--to` goes to; any
 operator approves or answers it. In yardr's code the list is `OperatorCalls`, and
-it has fourteen calls: `GiveSecret`, which gives the credential a secret ask
+it has sixteen calls: `GiveSecret`, which gives the credential a secret ask
 asks for, `ApproveAsk`, which approves a run ask so that the yard runs
 the command it holds, carrying the approval's values to a hook's register
 call where the card asks for any, `ApproveSetup`, which approves a setup ask with
@@ -7780,12 +7797,15 @@ settings, `Teammates`, which reads the yard's teammates, one row
 per mapped address with its user and devices, and `UninviteTeammate`,
 which files a teammate's removal as a run ask on a new bead; `TelemetryShow`,
 which previews the switch and next request; `TelemetrySet`, which turns
-the switch on or off; and `DevicePairOpen`, which opens a pairing for one
+the switch on or off; `PutStageFile`, which saves the stage file of a stage
+of a store flow, and `CopyRepoFlows`, which copies a depot's repository
+flows into the store; and `DevicePairOpen`, which opens a pairing for one
 device of one user, `DevicePairState`, which reads the open pairing back,
 and `DevicePairClose`, which ends it. Each of the first three
 takes `weighed`, the client's word that its person saw the card's weight,
 and the yard refuses a weighty card without it ([weighty
-cards](#weighty-cards)). Where they are served, and to whom:
+cards](#weighty-cards)); so do `PutStageFile` and `CopyRepoFlows`, which
+are weighty code and no card. Where they are served, and to whom:
 
 - **On the socket**, the class table above applies; a call with `actor`
   is held to the store's caller on a pane. `UninviteTeammate` is filed as
@@ -7843,6 +7863,17 @@ https or from the yard's own machine, like the other calls of this list.
 It never crosses a link to another yard: a secret ask is not sent to a
 peer, and is answered at the yard that asked.
 
+`PutStageFile` and `CopyRepoFlows` let the operator's own device make, with no
+card, what a crew member or a user proposes as a card (`flow set-stage`,
+`flow copy-repo`). Each is weighty code, so each takes `weighed` as an approval
+does, and is refused without it before anything is read or written. The store
+holds both to the operator whoever calls: from the pane of a crew member or of
+a bead's agent on the socket they are refused, and a card is what that pane
+files. A save keeps the text it replaces in `<home>/stage-history/<sha256>`, so
+a save from a stolen device can be put back. A copy replaces only an unused
+earlier copy, and the commands it names (`back`) point the depot at the
+repository again.
+
 What a give through a device writes says how it came, as its other writes
 do: the `noted` event of the answer, and `source_set` (for a user's own
 address or credential `user_set`) where the file is new, carry `data.via`.
@@ -7859,6 +7890,11 @@ it, and a `hook_blocked` names the file of the hook's secret: the stream
 tells these to a device of the operator alone, and to any other device the
 event names the source, the user or the hook and not them ([over the
 network](#over-the-network)).
+
+A save through a device writes a `flow_set` event with `data.via`. A copy
+writes a `flow_set` and a `flow_pointer_set` for each flow it copies, each with
+`data.via`. The value is the device's name, and `<device> via edge` down the
+link.
 
 An approval never crosses a link to another yard either: a run ask is
 approved in the yard that asked, and `ApproveAsk` refuses a `bead@peer`.
@@ -7930,6 +7966,17 @@ That refusal is no stale one: the card is the one that was shown, so the
 ask stays open, to be approved where its weight is shown. A routine card
 is approved without `weighed` as it always was, and a client from before
 the argument, which leaves it out, makes the same calls it did.
+
+Two calls that are no card take `weighed` too. `PutStageFile` and
+`CopyRepoFlows` write what a `flow set-stage` card and a `flow copy-repo` card
+would, and the yard weighs both of those `code`, always. Without `weighed` the
+call is refused before anything is read or written, with the code `error` and
+a card's tail: `saving a stage file is weighty (code): a client sends
+"weighed": true once its person has passed its gate`, or `copying a depot's
+repository flows is weighty (code):` and the same tail. The gate is the client's
+here as it is for a card. A client sends `weighed: true` after its person has
+passed the gate, and a client from before the argument is refused with these
+words.
 
 A card the yard weighs `trust` or `code` is *strong*. A strong card is
 approved from a device as any weighty card is: `ApproveAsk` and
@@ -9391,6 +9438,155 @@ POST /call/TelemetrySet
 | `endpoint` | string | where the daemon posts the daily batch |
 
 Deleting `<home>/telemetry.json` forgets the install id, a separate deliberate act; the next on mints a new one. To have the yard's data deleted, the operator sends the project the install id.
+
+### `PutStageFile`
+
+Saves the stage file of a stage of a store flow, as `yardr flow set-stage` does. The text goes in whole, by rename, at `<home>/flows/<flow>/<stage>.md` (a stage whose name holds a slash has its file a directory deeper), so a reader sees the old file or the new. Whoever works a bead in the stage, in every depot that follows the flow, is shown it from then on. `expect_digest` holds the save to the file as it was read. Left out, the save writes over whatever stands. `none` writes only where no file stands. The SHA-256 of the file in 64 hex digits, as `sha256sum` prints it, writes only where that file stands, so a file that moved since is refused, with both digests named. The text a save replaces is kept first, in `<home>/stage-history/<sha256>`, a read-only file named by the SHA-256 of the text, and a save that cannot keep it is refused. Saving that file puts the text back. A flow of a depot's repository has its stage files there, to be changed on a branch and committed, so it is refused with the path to edit, and so is a stage the flow does not have. A text whose `## Ask` section is broken is saved all the same, and the reply says where, since the operator may be part way through an edit. A stage file is weighty code, as the card of the same name is ([weighty cards](#weighty-cards)): without `weighed` the call is refused before anything is read or written. The operator makes it. On the socket the store refuses anyone else, whatever `actor` says, so a crew member or a bead's agent proposes the card instead. On the listener it is there for a device of the operator and for no other caller. The save is recorded as a `flow_set` event with the stage beside the flow and the digests of the text written and of the text replaced, with no prose. The event carries `via` when a device made the save. The operator's device token goes with the request, so the listener takes it only over https or from the yard's own machine, and never from the router's peer. Down the link from the edge it takes it from a device of the operator on a hosted yard, and on any other yard only in a call that came sealed ([TLS is yours](#tls-is-yours-and-the-clients-rule)).
+
+| argument | type | |
+|---|---|---|
+| `flow` | string | the store flow whose stage file it is |
+| `stage` | string | a stage the flow has |
+| `text` | string | the stage file whole: UTF-8 text with something in it |
+| `expect_digest` | string | what the save is held to: `none`, or the SHA-256 of the file as it was read; left out, whatever stands is written over |
+| `actor` | string | who saves: the operator's name; a device calls as its user, and the field may be left out |
+| `weighed` | bool | `true` once the person has seen that a stage file is weighty and has passed the client's gate; left out, `false`, and the call is refused before anything is written |
+
+```
+POST /call/PutStageFile
+{"flow":"default","stage":"shipped","text":"Ship it, say so, and name the commit.\n","expect_digest":"950c09583f9fb90529d247b7f6f9613595b81e03727556ca751882bbac7f4a77","actor":"jo","weighed":true}
+
+{
+  "result": {
+    "path": "/home/jo/.yardr/flows/default/shipped.md",
+    "text": "Ship it, say so, and name the commit.\n",
+    "digest": "ca5480f57f58024d4f80e2b72b007285e0ca898cb55f61a6bf51569567ebd183",
+    "prior_digest": "950c09583f9fb90529d247b7f6f9613595b81e03727556ca751882bbac7f4a77",
+    "prior_text": "Ship it, and say so.\n"
+  }
+}
+```
+
+```
+POST /call/PutStageFile
+{"flow":"default","stage":"new","text":"Build it, then ask.\n\n## Ask\nkind: choice\nquestion: Accept it?\ncontext:\n- Why.\ndone: Go.\nbacklog: No.\n","actor":"jo","weighed":true}
+
+{
+  "result": {
+    "path": "/home/jo/.yardr/flows/default/new.md",
+    "text": "Build it, then ask.\n\n## Ask\nkind: choice\nquestion: Accept it?\ncontext:\n- Why.\ndone: Go.\nbacklog: No.\n",
+    "digest": "ea0210d8fcf4d9eb372fc54aa923514778be7bd8ada7c5a52cde5f68efe55d77",
+    "prior_digest": "1f133becd521c8adc74ad73c2f6a926ec99efd39eaf5c5c2fc19200ad09e2496",
+    "prior_text": "Build it.\n\n## Ask\nkind: choice\nquestion: Accept it?\ncontext:\n- Why.\ndone: Go.\nbacklog: No.\n",
+    "warning": "/home/jo/.yardr/flows/default/new.md: ask line 9: flow default has no outcome backlog for stage new; outcomes: done"
+  }
+}
+```
+
+| field of the result | type | |
+|---|---|---|
+| `path` | string | the stage file's path on the yard's machine |
+| `text` | string | the text now standing, whole |
+| `digest` | string | the SHA-256 of `text` in lower case hex: what the next save's `expect_digest` holds it to |
+| `prior_digest` | string, may be absent | the SHA-256 of the text this save replaced; absent where it replaced none (it created the file, or wrote the text that stood) |
+| `prior_text` | string, may be absent | the text this save replaced, whole, which `<home>/stage-history/<prior_digest>` keeps; absent as `prior_digest` is |
+| `warning` | string, may be absent | where `text` breaks its `## Ask` section, as `<path>: <why>`; absent where it does not. A save is never refused for it |
+
+A save of the text that stands replaces nothing and keeps nothing. When the call ends without a reply (the server went away), a client cannot know whether the file was saved: say "the yard did not answer; read the stage file again", never "saved", and read [`Line`](#line) again, whose `stage_file` carries the digest to hold the next save to.
+
+### `CopyRepoFlows`
+
+Copies the flows of a depot's repository that govern its beads into the store, as `yardr flow copy-repo` does, so they can be changed in the yard. The depot's own flow (`default.flow`), the flow of each type that has a file (`type/<type>.flow`) and a named flow a pointer of the depot leads to become store flows, named `<depot>.default` and `<depot>.<type>` (with `.local` after a name the repository has a flow of). Their stage files are written under `<home>/flows/<flow>/`, and the depot and each of those types are pointed at the copies. It is all one write, so no bead is ever governed by half of the copy. A flow of the depot that governs from the store already stays as it is, and a depot with nothing to copy is refused, with what it has named. A store flow of a copy's name that no depot, type or open bead follows, and that no pack manages, is what an earlier copy left when it was switched back, and the new copy replaces it with its stage files. One that is followed, or a pack's, refuses the whole copy and names who follows it; nothing is written. What lands in the repository's `.yardr/flows/` afterwards does not reach the flows copied. `back` is the command that points each pointer at the repository again, and leaves the copy in the store, unused. A copy is weighty code, as the card of the same name is ([weighty cards](#weighty-cards)): without `weighed` the call is refused before the repository is read or anything is written. The operator makes it. On the socket the store refuses anyone else, whatever `actor` says, so a crew member or a bead's agent proposes the card instead. On the listener it is there for a device of the operator and for no other caller. Each flow copied is recorded as a `flow_set` event and a `flow_pointer_set` event, each with `via` when a device made the copy. The listener takes the call as it takes `PutStageFile`: over https or from the yard's own machine, never from the router's peer, and down the link from the edge on a hosted yard or, on any other yard, only in a call that came sealed ([TLS is yours](#tls-is-yours-and-the-clients-rule)).
+
+| argument | type | |
+|---|---|---|
+| `depot` | string | the depot whose repository's flows are copied |
+| `actor` | string | who copies: the operator's name; a device calls as its user, and the field may be left out |
+| `weighed` | bool | `true` once the person has seen that a copy of flows is weighty and has passed the client's gate; left out, `false`, and the call is refused before anything is read or written |
+
+```
+POST /call/CopyRepoFlows
+{"depot":"linegit","actor":"jo","weighed":true}
+
+{
+  "result": {
+    "depot": "linegit",
+    "source": "repo@abcdef0",
+    "flows": [
+      {
+        "from": ".yardr/flows/default.flow",
+        "flow": "linegit.default",
+        "stage_files": 1,
+        "back": "yardr depot source linegit flow depot"
+      }
+    ]
+  }
+}
+```
+
+```
+POST /call/CopyRepoFlows
+{"depot":"kit","actor":"jo","weighed":true}
+
+{
+  "result": {
+    "depot": "kit",
+    "source": "repo (directory)",
+    "flows": [
+      {
+        "from": ".yardr/flows/default.flow",
+        "flow": "kit.default",
+        "stage_files": 2,
+        "back": "yardr depot source kit flow depot"
+      },
+      {
+        "type": "release",
+        "from": ".yardr/flows/type/release.flow",
+        "flow": "kit.release",
+        "stage_files": 1,
+        "back": "yardr depot source kit flow --type release depot"
+      }
+    ]
+  }
+}
+```
+
+```
+POST /call/CopyRepoFlows
+{"depot":"kit","actor":"jo","weighed":true}
+
+{
+  "result": {
+    "depot": "kit",
+    "source": "repo (directory)",
+    "flows": [
+      {
+        "from": ".yardr/flows/default.flow",
+        "flow": "kit.default",
+        "stage_files": 2,
+        "replaced": true,
+        "back": "yardr depot source kit flow depot"
+      }
+    ],
+    "kept": ["type/release"]
+  }
+}
+```
+
+| field of the result | type | |
+|---|---|---|
+| `depot` | string | the depot whose flows were copied |
+| `source` | string | where they were read: `repo@<short commit>` of the depot's base, or `repo (directory)` where its repository is a directory |
+| `flows` | array | each flow copied, the depot's own first and then one for each type, by type |
+| `flows[].type` | string, may be absent | the bead type the flow governs; absent on the depot's own flow |
+| `flows[].from` | string | its file in the repository |
+| `flows[].flow` | string | the store flow it was copied to |
+| `flows[].stage_files` | number | how many stage files were written under `<home>/flows/<flow>/`: those with text in them, of a stage the flow has |
+| `flows[].replaced` | bool, may be absent | `true` where an unused earlier copy under that name was replaced, its stage files with it; absent otherwise |
+| `flows[].back` | string | the command that points this pointer at the repository again, in a line to show as it is |
+| `kept` | array of string, may be absent | the places that governed the depot from the store already and were left as they are: `default`, or `type/<type>`; absent where there were none |
+
+A depot's pointers are copied together, so run the `back` commands in the order of `flows`: the depot's pointer stands in front of the repository's files, so it is pointed back first. The flows, pointers and events are one write, all in place or none. When the call ends without a reply (the server went away), a client cannot know whether the copy was made: say "the yard did not answer; read the depot's flows again", never "copied", and read [`Line`](#line) of the depot again, which says which flow governs each stage.
 
 <!-- /local -->
 

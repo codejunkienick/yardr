@@ -272,10 +272,18 @@ func HomeStageFiles(home string, f *Flow) (have map[string]string, stray []strin
 // prev_digest, no prose). From a pane the actor is the pane's (paneAuthor), as
 // PutFlow's is.
 //
+// A stage file is weighty code, as the card of the same name is: a call that
+// does not say its person saw that (weighed) is refused first, before anything
+// is read or written. A paired device of the operator makes the call, and what
+// it writes is marked with the device (writeVia), as an approval's is.
+//
 // The answer is the stage file as the Line carries it (LineStageFile): its
 // digest, the text it replaced, and where its ## Ask section is broken, which
 // refuses nothing, since the operator may be part way through an edit.
-func (s *Store) PutStageFile(ctx context.Context, flow, stage, text, expectDigest, actor string) (*LineStageFile, error) {
+func (s *Store) PutStageFile(ctx context.Context, flow, stage, text, expectDigest, actor string, weighed bool) (*LineStageFile, error) {
+	if err := weighedWriteRefusal("saving a stage file", weighed); err != nil {
+		return nil, err
+	}
 	expect, err := stageExpect(expectDigest)
 	if err != nil {
 		return nil, err
@@ -294,7 +302,7 @@ func (s *Store) PutStageFile(ctx context.Context, flow, stage, text, expectDiges
 		return nil, err
 	}
 	var out *LineStageFile
-	err = s.write(func(w *wtx) error {
+	err = s.writeVia(ctx, func(w *wtx) error {
 		w.repos = repos
 		resolved, err := paneAuthor(w.Tx, callerOf(ctx), actor)
 		if err != nil {

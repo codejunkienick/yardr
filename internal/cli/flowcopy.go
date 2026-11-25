@@ -50,7 +50,10 @@ yardr bead ask <id> -, with R: flow copy-repo <depot> on stdin.`,
 			if err != nil {
 				return err
 			}
-			res, err := st.CopyRepoFlows(c.Context(), args[0], a.who())
+			// A terminal has no second gate to pass: the command is the
+			// person's choice to copy, so it says weighed. What holds the copy
+			// to the operator is the store, whoever types the command.
+			res, err := st.CopyRepoFlows(c.Context(), args[0], a.who(), true)
 			if err != nil {
 				return err
 			}

@@ -330,6 +330,56 @@ func teammatesInTheClear(r *http.Request, router, what, readHere string) string 
 	return ""
 }
 
+// operatorInTheClear is inTheClear for a call of OperatorCalls that the
+// listener judges before it reads the body, which is every one but a giving
+// and a setup approval down the link. A save of a stage file and a copy of a
+// depot's repository flows have a rule of their own (stageWriteInTheClear),
+// which asks whether the yard is hosted only down the link, and only when the
+// answer decides. Any other call is judged by inTheClear as it always was and
+// reads of the yard's settings the router's address alone, so a call that
+// has no use for the hosted setting costs no read of it.
+func (u *UserServer) operatorInTheClear(r *http.Request, name string) string {
+	if name == "PutStageFile" || name == "CopyRepoFlows" {
+		return stageWriteInTheClear(r, name, func() bool { return u.hosted(r.Context()) })
+	}
+	return inTheClear(r, name, u.routerAddr(r.Context()), false, false, false)
+}
+
+// stageWriteInTheClear says why a save of a stage file or a copy of a depot's
+// repository flows (PutStageFile, CopyRepoFlows) is not taken from the request
+// r, "" when it is. What they write is what every bead of a flow is shown and
+// run by, and the operator's device token goes with the request, so they are
+// held to an approval's rule, which teammatesInTheClear holds whatever the call:
+// over https or from the yard's own machine, never from a request whose proxy
+// says it came in plain, and never from the router's peer, which the empty
+// router passed here names none of.
+//
+// Down the link from the edge a device of the operator (operatorCall) is taken
+// on a hosted yard, whose service runs the edge and the machine the yard lives
+// on, and on any other yard only when the call came sealed, since the edge
+// carries it as ciphertext. A plain call there lets an edge that reads the
+// device's token save text the yard's agents are then told, so it is refused,
+// naming the two fixes, a sealed device and the yard's own machine, and saying
+// that the token crossed in plain. hosted is asked only of a call that came
+// down the link and is not sealed: a sealed call is taken on any yard, and off
+// the link the answer decides nothing.
+func stageWriteInTheClear(r *http.Request, name string, hosted func() bool) string {
+	what, here := "saving a stage file", "save it on the yard's machine (`yardr flow set-stage`)."
+	if name == "CopyRepoFlows" {
+		what, here = "copying a depot's repository flows", "copy them on the yard's machine (`yardr flow copy-repo`)."
+	}
+	if r.RemoteAddr == linkRemoteAddr {
+		// Only serveInner sets the session, so nothing a client sends claims
+		// a call came sealed.
+		if _, sealed := r.Context().Value(e2eSessionKey{}).(*e2eSession); !sealed && !hosted() {
+			return what + " does not cross the edge in a call that is not sealed: this request came down the link from the edge. " +
+				"Make it from a sealed device (pairing the device with the QR makes it one), or " + here +
+				" The edge saw the device's token with it: remove the device and add it again (yardr user device rm)."
+		}
+	}
+	return teammatesInTheClear(r, "", what, here)
+}
+
 // telemetryShowInTheClear keeps the telemetry preview under the same
 // transport rule as the other operator calls: the install id groups the
 // yard's events across time, so it is read over https or from the yard's

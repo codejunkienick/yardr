@@ -145,7 +145,7 @@ func (y *askYard) copyState(t *testing.T) string {
 func (y *askYard) copyRefused(t *testing.T, depot, actor, want string) {
 	t.Helper()
 	before := y.copyState(t)
-	if res, err := y.CopyRepoFlows(y.ctx, depot, actor); err == nil || !strings.Contains(err.Error(), want) {
+	if res, err := y.CopyRepoFlows(y.ctx, depot, actor, true); err == nil || !strings.Contains(err.Error(), want) {
 		t.Errorf("CopyRepoFlows(%s) as %s = %+v, %v, want it refused with %q", depot, actor, res, err, want)
 	}
 	if after := y.copyState(t); after != before {
@@ -176,7 +176,7 @@ func TestCopyRepoFlowsOfAGitDepotWithOpenBeads(t *testing.T) {
 		open = append(open, b.ID)
 	}
 
-	res, err := y.CopyRepoFlows(y.ctx, "web", "mckean")
+	res, err := y.CopyRepoFlows(y.ctx, "web", "mckean", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -328,7 +328,7 @@ func TestCopyRepoFlowsOfNamedRepositoryFlows(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			res, err := y.CopyRepoFlows(y.ctx, c.depot, "mckean")
+			res, err := y.CopyRepoFlows(y.ctx, c.depot, "mckean", true)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -382,7 +382,7 @@ func TestCopyRepoFlowsAfterSwitchingBackReplacesTheEarlierCopy(t *testing.T) {
 		"default.flow": copyDefault, "type/wagon.flow": copyWagon,
 		"default/new.md": "Build it.\n", "default/review.md": "Review it.\n", "type/wagon/ride.md": "Ride it.\n",
 	})
-	first, err := y.CopyRepoFlows(y.ctx, "web", "mckean")
+	first, err := y.CopyRepoFlows(y.ctx, "web", "mckean", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -423,7 +423,7 @@ func TestCopyRepoFlowsAfterSwitchingBackReplacesTheEarlierCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, err := y.CopyRepoFlows(y.ctx, "web", "mckean")
+	res, err := y.CopyRepoFlows(y.ctx, "web", "mckean", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -462,7 +462,7 @@ func TestCopyRepoFlowsAfterSwitchingBackReplacesTheEarlierCopy(t *testing.T) {
 	if _, err := y.CloseBead(y.ctx, pinned.ID, "done", Expect{}, "mckean"); err != nil {
 		t.Fatal(err)
 	}
-	if res, err = y.CopyRepoFlows(y.ctx, "web", "mckean"); err != nil || !res.Flows[0].Replaced {
+	if res, err = y.CopyRepoFlows(y.ctx, "web", "mckean", true); err != nil || !res.Flows[0].Replaced {
 		t.Fatalf("the copy over a copy a closed bead pinned = %+v, %v", res, err)
 	}
 	back()
@@ -604,13 +604,16 @@ func TestCopyRepoFlowsRefusesToStrandAnOpenBead(t *testing.T) {
 	if _, err := y.Advance(y.ctx, b.ID, "backlog", Expect{}, "mckean"); err != nil {
 		t.Fatal(err)
 	}
-	if res, err := y.CopyRepoFlows(y.ctx, "web", "mckean"); err != nil || len(res.Flows) != 1 {
+	if res, err := y.CopyRepoFlows(y.ctx, "web", "mckean", true); err != nil || len(res.Flows) != 1 {
 		t.Errorf("the copy once the bead has moved = %+v, %v", res, err)
 	}
 }
 
 // Copying a depot's flows is the operator's, as a flow's stages are: a crew
-// member or a user is refused, and nothing is written.
+// member or a user is refused, and nothing is written. It is weighty code, as
+// its card is, so a call that does not say its person saw that is refused
+// before the depot is looked at, and what a device's call writes is marked
+// with the device.
 func TestCopyRepoFlowsIsTheOperatorsAlone(t *testing.T) {
 	t.Parallel()
 	y := listYard(t)
@@ -618,8 +621,24 @@ func TestCopyRepoFlowsIsTheOperatorsAlone(t *testing.T) {
 	for _, actor := range []string{"yardmaster", "ada"} {
 		y.copyRefused(t, "web", actor, "only the operator (mckean) may change a flow's stages; this is "+actor)
 	}
-	if _, err := y.CopyRepoFlows(y.ctx, "web", "mckean"); err != nil {
-		t.Errorf("the operator's own copy: %v", err)
+	before := y.copyState(t)
+	for _, c := range []struct{ depot, actor string }{{"web", "mckean"}, {"web", "ada"}, {"no-such-depot", "mckean"}} {
+		if res, err := y.CopyRepoFlows(y.ctx, c.depot, c.actor, false); err == nil ||
+			!strings.Contains(err.Error(), `copying a depot's repository flows is weighty (code): a client sends "weighed": true once its person has passed its gate`) {
+			t.Errorf("CopyRepoFlows(%s) as %s without weighed = %+v, %v, want it refused as weighty (code)", c.depot, c.actor, res, err)
+		}
+	}
+	if after := y.copyState(t); after != before {
+		t.Errorf("a copy without weighed changed the yard:\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+	if _, err := y.CopyRepoFlows(WithVia(y.ctx, "mckean", "phone via edge"), "web", "mckean", true); err != nil {
+		t.Fatalf("the operator's own copy: %v", err)
+	}
+	for _, kind := range []string{"flow_set", "flow_pointer_set"} {
+		evs, err := y.EventsOfKind(y.ctx, kind, 50)
+		if err != nil || len(evs) != 1 || evs[0].Actor != "mckean" || Via(evs[0]) != "phone via edge" {
+			t.Errorf("the copy through a device left the %s events %+v, %v, want one by mckean via phone via edge", kind, evs, err)
+		}
 	}
 }
 
@@ -640,7 +659,7 @@ func TestCopyRepoFlowsRunTwiceEndsTheSame(t *testing.T) {
 		y := listYard(t)
 		y.dirDepotWith(t, "web", files)
 		if replacing {
-			if _, err := y.CopyRepoFlows(y.ctx, "web", "mckean"); err != nil {
+			if _, err := y.CopyRepoFlows(y.ctx, "web", "mckean", true); err != nil {
 				t.Fatal(err)
 			}
 			for _, typ := range []string{"", "wagon"} {
@@ -658,7 +677,7 @@ func TestCopyRepoFlowsRunTwiceEndsTheSame(t *testing.T) {
 		t.Run(fmt.Sprintf("replacing=%v", replacing), func(t *testing.T) {
 			t.Parallel()
 			once := yard(t, replacing)
-			wantRes, err := once.CopyRepoFlows(once.ctx, "web", "mckean")
+			wantRes, err := once.CopyRepoFlows(once.ctx, "web", "mckean", true)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -878,7 +897,7 @@ func TestRunAskFlowCopyRepoIsStaleWhereTheYardMoved(t *testing.T) {
 
 	// A copy that stands since the ask, and is followed: the card's own
 	// refusal at approval, not a staleness.
-	if _, err := y.CopyRepoFlows(y.ctx, "plain", "mckean"); err != nil {
+	if _, err := y.CopyRepoFlows(y.ctx, "plain", "mckean", true); err != nil {
 		t.Fatal(err)
 	}
 	if err := y.SetFlowPointer(y.ctx, "plain", "", "", "mckean"); err != nil {
@@ -919,7 +938,7 @@ func TestRunAskFlowCopyRepoRefusals(t *testing.T) {
 		}
 	}
 	// A copy somebody follows is refused where it is asked.
-	if _, err := y.CopyRepoFlows(y.ctx, "web", "mckean"); err != nil {
+	if _, err := y.CopyRepoFlows(y.ctx, "web", "mckean", true); err != nil {
 		t.Fatal(err)
 	}
 	if err := y.SetFlowPointer(y.ctx, "web", "", "", "mckean"); err != nil {

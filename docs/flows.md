@@ -208,7 +208,10 @@ it has, and so is one whose governing file does not parse.
 Only the operator copies, as only the operator writes a stage file (`flow
 set-stage`): the store refuses a crew member or a user, who propose it as a
 card instead, which the operator approves: `yardr bead ask <id> -`, with `R:
-flow copy-repo <depot>` on stdin. The card is weighty `code`, always. It shows
+flow copy-repo <depot>` on stdin. The operator's paired device makes the same
+copy with no card ([`CopyRepoFlows`](api.md#copyrepoflows)). It says `weighed`,
+as the save of a stage file does, and what it writes carries `via`.
+The card is weighty `code`, always. It shows
 each file and the store flow it becomes, with its stage files and, for a
 pointer, the flow it led to; which copy replaces an unused earlier one and
 removes its files; the flows that stay as they are; that the repository's files
@@ -688,6 +691,13 @@ whatever the pack moves, and sets the pack's only where it is told to
 (`--take file/<name>`, the name `yardr pack check <pack>` gives the file).
 Either way the write is recorded as `flow_set`, with the `stage` beside the
 `flow`, and the `digest` and `prev_digest` above.
+
+The operator's paired device makes the same save with no card
+([`PutStageFile`](api.md#putstagefile)). The call says `weighed`, which its
+client sends once its person has passed its gate, and the `flow_set` it writes
+carries `via`, the device's name. The store holds the save to the operator, as
+it does for the command. [users.md](users.md#devices) says what a stolen device
+can do with it.
 
 Where it shows:
 

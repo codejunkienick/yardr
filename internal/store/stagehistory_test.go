@@ -122,7 +122,7 @@ func TestPutStageFileKeepsWhatItReplaces(t *testing.T) {
 	// wrote, its digest and the text it replaced.
 	save := func(stage, text, digest, replaced string) *LineStageFile {
 		t.Helper()
-		got, err := y.PutStageFile(y.ctx, "code", stage, text, digest, "mckean")
+		got, err := y.PutStageFile(y.ctx, "code", stage, text, digest, "mckean", true)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -286,7 +286,7 @@ func TestPutStageFileIsRefusedWhereItCannotKeepWhatItReplaces(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			y := stageYard(t)
-			if _, err := y.PutStageFile(y.ctx, "code", "work", v1, stageNone, "mckean"); err != nil {
+			if _, err := y.PutStageFile(y.ctx, "code", "work", v1, stageNone, "mckean", true); err != nil {
 				t.Fatal(err)
 			}
 			writes := y.stageWrites(t)
@@ -296,7 +296,7 @@ func TestPutStageFileIsRefusedWhereItCannotKeepWhatItReplaces(t *testing.T) {
 			}
 			stands := c.plant(t, y, other)
 
-			_, err := y.PutStageFile(y.ctx, "code", "work", v2, "", "mckean")
+			_, err := y.PutStageFile(y.ctx, "code", "work", v2, "", "mckean", true)
 			if err == nil || !strings.Contains(err.Error(), "keep the text it replaces") || !strings.Contains(err.Error(), c.want) {
 				t.Fatalf("PutStageFile = %v, want it refused, with %q", err, c.want)
 			}
@@ -321,7 +321,7 @@ func TestPutStageFileIsRefusedWhereItCannotKeepWhatItReplaces(t *testing.T) {
 			if err := os.RemoveAll(stands); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := y.PutStageFile(y.ctx, "code", "work", v2, "", "mckean"); err != nil {
+			if _, err := y.PutStageFile(y.ctx, "code", "work", v2, "", "mckean", true); err != nil {
 				t.Fatalf("PutStageFile once nothing stands in the way = %v", err)
 			}
 			y.historyIs(t, v1)
@@ -515,7 +515,7 @@ func TestLineStageFileOfAStoreFlow(t *testing.T) {
 	}
 	save := func(text, digest string) *LineStageFile {
 		t.Helper()
-		sf, err := y.PutStageFile(y.ctx, "code", "work", text, digest, "mckean")
+		sf, err := y.PutStageFile(y.ctx, "code", "work", text, digest, "mckean", true)
 		if err != nil {
 			t.Fatal(err)
 		}

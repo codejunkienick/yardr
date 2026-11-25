@@ -323,7 +323,7 @@ func TestRunAskFlowSetStageIsStaleWhereTheFileMoved(t *testing.T) {
 
 	// Changed since, by the store's own write: that write is named.
 	seq = y.ask(t, stageAsk("Mine.\n", "code", "work"), "yardmaster")
-	if _, err := y.PutStageFile(y.ctx, "code", "work", "Theirs again.\n", "", "mckean"); err != nil {
+	if _, err := y.PutStageFile(y.ctx, "code", "work", "Theirs again.\n", "", "mckean", true); err != nil {
 		t.Fatal(err)
 	}
 	y.refusedStale(t, seq, "was written when the stage file of stage work of the flow code was another: it was changed since (flow_set, ")
@@ -399,14 +399,14 @@ func TestFlowSetStageRefusesARepositoryFlow(t *testing.T) {
 		if _, err := y.AddAsk(y.ctx, y.bead, stageAsk("Text.\n", c.flow, c.stage), "yardmaster"); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("asking for the stage file of %s = %v, want %q", c.flow, err, want)
 		}
-		if _, err := y.PutStageFile(y.ctx, c.flow, c.stage, "Text.\n", "", "mckean"); err == nil || !strings.Contains(err.Error(), want) {
+		if _, err := y.PutStageFile(y.ctx, c.flow, c.stage, "Text.\n", "", "mckean", true); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("PutStageFile of %s = %v, want %q", c.flow, err, want)
 		}
 	}
 	if _, err := os.Stat(filepath.Join(y.home, "flows", "default")); err == nil {
 		t.Error("a refused write made the directory of the repository's flow")
 	}
-	if _, err := y.PutStageFile(y.ctx, "ghost", "new", "Text.\n", "", "mckean"); !errors.Is(err, ErrNotFound) {
+	if _, err := y.PutStageFile(y.ctx, "ghost", "new", "Text.\n", "", "mckean", true); !errors.Is(err, ErrNotFound) {
 		t.Errorf("PutStageFile of a flow no depot has = %v, want not found", err)
 	}
 	// A store flow is looked up in the store alone, and a repository holding
@@ -415,7 +415,7 @@ func TestFlowSetStageRefusesARepositoryFlow(t *testing.T) {
 	if _, err := y.AddAsk(y.ctx, y.bead, stageAsk("Text.\n", "code", "work"), "yardmaster"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := y.PutStageFile(y.ctx, "code", "work", "Text.\n", "", "mckean"); err != nil {
+	if _, err := y.PutStageFile(y.ctx, "code", "work", "Text.\n", "", "mckean", true); err != nil {
 		t.Fatal(err)
 	}
 	if got := y.repoReads.Load(); got != reads {
@@ -513,13 +513,23 @@ func TestPutStageFile(t *testing.T) {
 	y := stageYard(t)
 	text := "Build it.\n"
 	for _, actor := range []string{"yardmaster", "ada"} {
-		if _, err := y.PutStageFile(y.ctx, "code", "work", text, "", actor); err == nil || !strings.Contains(err.Error(), "only the operator (mckean) may change a flow's stages; this is "+actor) {
+		if _, err := y.PutStageFile(y.ctx, "code", "work", text, "", actor, true); err == nil || !strings.Contains(err.Error(), "only the operator (mckean) may change a flow's stages; this is "+actor) {
 			t.Errorf("PutStageFile as %s = %v, want it the operator's alone", actor, err)
 		}
 	}
 	y.stageIs(t, "work", "", 0o644)
+	// A save is weighty code, as its card is: a client that does not say its
+	// person saw that is refused first, whoever it is, with nothing read,
+	// written or recorded (the events are counted below).
+	for _, c := range []struct{ flow, actor string }{{"code", "mckean"}, {"code", "ada"}, {"no-such-flow", "mckean"}} {
+		if _, err := y.PutStageFile(y.ctx, c.flow, "work", text, "", c.actor, false); err == nil ||
+			!strings.Contains(err.Error(), `saving a stage file is weighty (code): a client sends "weighed": true once its person has passed its gate`) {
+			t.Errorf("PutStageFile of %s as %s without weighed = %v, want it refused as weighty (code)", c.flow, c.actor, err)
+		}
+	}
+	y.stageIs(t, "work", "", 0o644)
 
-	sf, err := y.PutStageFile(y.ctx, "code", "work", text, "NONE", "mckean")
+	sf, err := y.PutStageFile(y.ctx, "code", "work", text, "NONE", "mckean", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -536,13 +546,13 @@ func TestPutStageFile(t *testing.T) {
 		{strings.Repeat("0", 64), "holds sha256 " + sha256Hex(text) + ", not the " + strings.Repeat("0", 64)},
 		{"zz", `digest "zz"`},
 	} {
-		if _, err := y.PutStageFile(y.ctx, "code", "work", "Other.\n", c.expect, "mckean"); err == nil || !strings.Contains(err.Error(), c.want) {
+		if _, err := y.PutStageFile(y.ctx, "code", "work", "Other.\n", c.expect, "mckean", true); err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("PutStageFile held to %q = %v, want %q", c.expect, err, c.want)
 		}
 	}
 	y.stageIs(t, "work", text, 0o644)
 	next := "Build it, then say so.\n"
-	if _, err := y.PutStageFile(y.ctx, "code", "work", next, strings.ToUpper(sha256Hex(text)), "mckean"); err != nil {
+	if _, err := y.PutStageFile(y.ctx, "code", "work", next, strings.ToUpper(sha256Hex(text)), "mckean", true); err != nil {
 		t.Fatal(err)
 	}
 	y.stageIs(t, "work", next, 0o644)
@@ -556,14 +566,27 @@ func TestPutStageFile(t *testing.T) {
 		{"code", "review", "x\n", "flow code has no stage review"},
 		{"a b", "work", "x\n", `flow name "a b"`},
 	} {
-		if _, err := y.PutStageFile(y.ctx, c.flow, c.stage, c.text, "", "mckean"); err == nil || !strings.Contains(err.Error(), c.want) {
+		if _, err := y.PutStageFile(y.ctx, c.flow, c.stage, c.text, "", "mckean", true); err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("PutStageFile(%q, %q, %q) = %v, want %q", c.flow, c.stage, c.text, err, c.want)
 		}
 	}
 	y.stageIs(t, "work", next, 0o644)
+	// A call a device made carries the device's mark (WithVia) on its event,
+	// down the link from the edge as well, and one made at the yard's own
+	// machine carries none.
+	for _, device := range []string{"phone", "phone via edge"} {
+		if _, err := y.PutStageFile(WithVia(y.ctx, "mckean", device), "code", "work", next+device+"\n", "", "mckean", true); err != nil {
+			t.Fatal(err)
+		}
+	}
 	evs := y.stageEvents(t)
-	if len(evs) != 2 || evs[0].Data["flow"] != "code" || evs[1].Data["stage"] != "work" || evs[1].Actor != "mckean" {
-		t.Errorf("the writes left the events %+v, want two flow_set of code and work by mckean", evs)
+	if len(evs) != 4 || evs[0].Data["flow"] != "code" || evs[1].Data["stage"] != "work" || evs[1].Actor != "mckean" {
+		t.Fatalf("the writes left the events %+v, want four flow_set of code and work by mckean", evs)
+	}
+	for i, want := range []string{"", "", "phone", "phone via edge"} {
+		if got := Via(evs[i]); got != want {
+			t.Errorf("flow_set %d is marked via %q, want %q", i, got, want)
+		}
 	}
 }
 
@@ -595,14 +618,14 @@ func TestPutStageFileRunTwiceEndsTheSame(t *testing.T) {
 		t.Errorf("the retried write left the events %+v, want one", evs)
 	}
 	// A separate call still holds --digest even when the text is identical.
-	if _, err := y.PutStageFile(y.ctx, "code", "work", "Build it.\n", stageNone, "mckean"); err == nil || !strings.Contains(err.Error(), "though --digest none says none does") {
+	if _, err := y.PutStageFile(y.ctx, "code", "work", "Build it.\n", stageNone, "mckean", true); err == nil || !strings.Contains(err.Error(), "though --digest none says none does") {
 		t.Errorf("separate PutStageFile held to none with identical text = %v, want refusal", err)
 	}
-	if _, err := y.PutStageFile(y.ctx, "code", "work", "Build it.\n", strings.Repeat("0", 64), "mckean"); err == nil || !strings.Contains(err.Error(), "not the "+strings.Repeat("0", 64)) {
+	if _, err := y.PutStageFile(y.ctx, "code", "work", "Build it.\n", strings.Repeat("0", 64), "mckean", true); err == nil || !strings.Contains(err.Error(), "not the "+strings.Repeat("0", 64)) {
 		t.Errorf("separate PutStageFile held to wrong digest with identical text = %v, want refusal", err)
 	}
 	// Unconditional or matching digest with identical text succeeds.
-	if _, err := y.PutStageFile(y.ctx, "code", "work", "Build it.\n", sha256Hex("Build it.\n"), "mckean"); err != nil {
+	if _, err := y.PutStageFile(y.ctx, "code", "work", "Build it.\n", sha256Hex("Build it.\n"), "mckean", true); err != nil {
 		t.Errorf("PutStageFile held to matching digest with identical text: %v", err)
 	}
 
@@ -663,13 +686,13 @@ func TestPutStageFileRunTwiceEndsTheSame(t *testing.T) {
 		{stageNone, "though --digest none says none does"},
 		{sha256Hex(once), "not the " + sha256Hex(once)},
 	} {
-		if _, err := y.PutStageFile(y.ctx, "code", "work", twice, c.expect, "mckean"); err == nil || !strings.Contains(err.Error(), c.want) {
+		if _, err := y.PutStageFile(y.ctx, "code", "work", twice, c.expect, "mckean", true); err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("separate PutStageFile held to %q with identical text = %v, want refusal", c.expect, err)
 		}
 	}
 	// Held to the file that stands, it succeeds and replaces nothing, so it
 	// tells nothing was kept.
-	if got, err := y.PutStageFile(y.ctx, "code", "work", twice, sha256Hex(twice), "mckean"); err != nil || got.PriorDigest != "" || got.PriorText != "" {
+	if got, err := y.PutStageFile(y.ctx, "code", "work", twice, sha256Hex(twice), "mckean", true); err != nil || got.PriorDigest != "" || got.PriorText != "" {
 		t.Errorf("separate PutStageFile held to the matching digest with identical text = %+v, %v, want no prior", got, err)
 	}
 	y.historyHolds(t, once)
@@ -703,7 +726,7 @@ func TestPutStageFileRunTwiceEndsTheSame(t *testing.T) {
 	// the file is not the one the card saw, and nothing is kept or written.
 	thrice := "Build it thrice.\n"
 	seq = y.ask(t, stageAsk(thrice, "code", "work"), "yardmaster")
-	if _, err := y.PutStageFile(y.ctx, "code", "work", thrice, "", "mckean"); err != nil {
+	if _, err := y.PutStageFile(y.ctx, "code", "work", thrice, "", "mckean", true); err != nil {
 		t.Fatal(err)
 	}
 	y.historyHolds(t, once, "Smoke it.\n", twice)
@@ -734,7 +757,7 @@ func TestFlowSetStaleNamesTheFlowsWriteNotAStageFiles(t *testing.T) {
 	if _, err := y.PutFlow(y.ctx, *f, "ada"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := y.PutStageFile(y.ctx, "code", "in", "Wait here.\n", "", "mckean"); err != nil {
+	if _, err := y.PutStageFile(y.ctx, "code", "in", "Wait here.\n", "", "mckean", true); err != nil {
 		t.Fatal(err)
 	}
 	y.refusedStale(t, seq, "was written when the flow code was another: it was set since (flow_set, ")

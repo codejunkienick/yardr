@@ -220,8 +220,8 @@ var Access = map[string]Class{
 	"Routes":         Read,
 	"DeleteRoute":    Admin,
 	"PutFlow":        Admin,
-	"PutStageFile":   Admin,
-	"CopyRepoFlows":  Admin,
+	"PutStageFile":   Admin, // the store holds it to the operator; the operator's paired device makes it on the listener
+	"CopyRepoFlows":  Admin, // as PutStageFile
 	"ListFlows":      Read,
 	"GetFlow":        Read,
 	"DeleteFlow":     Admin,

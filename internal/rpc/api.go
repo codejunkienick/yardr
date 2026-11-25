@@ -217,6 +217,21 @@ var listenerOnly = map[string]bool{
 // the web view's control through its separate web link, where the view
 // verifies the gateway's JWT and maps it to a yard user.
 //
+// PutStageFile saves the stage file of a stage of a store flow, as `yardr flow
+// set-stage` does, and CopyRepoFlows copies the flows of a depot's repository
+// into the store, as `yardr flow copy-repo` does: what a crew member or a user
+// proposes as a card, the operator makes from a paired device at once. Both
+// write what whoever works a bead is shown and told, so both are weighty code
+// and take the argument weighed, as the approval of such a card does: the
+// store refuses a call without it before anything is written. Both are the
+// operator's in the store (ActChangeFlow) as well as here, so the pane of a
+// crew member or of a bead's agent on the socket still files a card. The
+// operator's device token goes with the request, so the listener takes them
+// only over https or from the yard's own machine, never from the router's
+// peer, and down the link from the edge from a device of the operator on a
+// hosted yard and, on any other, in a call that came sealed alone
+// (stageWriteInTheClear). What they write says it came by the device (via).
+//
 // DevicePairOpen opens a pairing for one device of one user, as `yardr
 // user device pair` does, and answers its code and expiry;
 // DevicePairState reads a directly opened pairing back with its code and
@@ -240,6 +255,8 @@ var OperatorCalls = map[string][]string{
 	"UninviteTeammate": {"user", "actor"},
 	"TelemetryShow":    {},
 	"TelemetrySet":     {"on", "actor"},
+	"PutStageFile":     {"flow", "stage", "text", "expect_digest", "actor", "weighed"},
+	"CopyRepoFlows":    {"depot", "actor", "weighed"},
 	"DevicePairOpen":   {"user", "name", "actor"},
 	"DevicePairState":  {},
 	"DevicePairClose":  {"actor"},

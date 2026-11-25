@@ -205,8 +205,8 @@ func TestUserServesTheCallsAndNoOther(t *testing.T) {
 	if len(served) != len(Calls) || len(served) != wantCalls {
 		t.Errorf("%d calls are served and Calls has %d, want %d of each: %v", len(served), len(Calls), wantCalls, served)
 	}
-	if !slices.Equal(operators, []string{"ApproveAsk", "ApproveSetup", "GiveSecret", "Line", "SessionScreen", "SourceGrants", "Teammates", "TelemetrySet", "TelemetryShow", "UninviteTeammate"}) || len(OperatorCalls) != wantOperatorCalls {
-		t.Errorf("a device of the operator is served %v besides, and OperatorCalls is %v: want ApproveAsk, ApproveSetup, GiveSecret, Line, SessionScreen, SourceGrants, Teammates, TelemetrySet, TelemetryShow, UninviteTeammate and no other of its %d", operators, OperatorCalls, wantOperatorCalls)
+	if !slices.Equal(operators, []string{"ApproveAsk", "ApproveSetup", "CopyRepoFlows", "GiveSecret", "Line", "PutStageFile", "SessionScreen", "SourceGrants", "Teammates", "TelemetrySet", "TelemetryShow", "UninviteTeammate"}) || len(OperatorCalls) != wantOperatorCalls {
+		t.Errorf("a device of the operator is served %v besides, and OperatorCalls is %v: want ApproveAsk, ApproveSetup, CopyRepoFlows, GiveSecret, Line, PutStageFile, SessionScreen, SourceGrants, Teammates, TelemetrySet, TelemetryShow, UninviteTeammate and no other of its %d", operators, OperatorCalls, wantOperatorCalls)
 	}
 	// The whole grant graph is the operator's to read: to sam's device the
 	// call is not there, as a method the yard does not have, whatever it

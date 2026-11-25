@@ -1273,8 +1273,8 @@ covered below under Strong cards. Row by row:
 | `depot test <depot>`: a depot's test command changed | The holder's command stands as what tests the depot: a script group's command gets it as YARDR_TEST, and builders' primes tell them to run it. Only the operator takes it back, with another card carrying the command that stood |
 | `depot add <name> --clone <url> [--kind git] [--base <branch>]`: a depot added | The repository stands cloned in the yard's depots directory as the depot, from its base, with the test command the card carried or none. Only the operator takes it back, in a terminal with `yardr depot rm <name>` |
 | `flow set <name>`: a store flow's stages changed | Every bead that follows the flow travels the holder's stages from then on, a reorder alone included. A flow a pack manages is no exception, and applying the pack does not undo it: `pack apply` keeps the holder's stages, whatever the pack moves. The card is strong (`code`), and the change stands after the device is removed. Only the operator takes it back, with the flow that stood or, for a pack's flow, with `pack apply --take flow/<name>`, at a terminal or on a pack apply card |
-| `flow set-stage <flow> <stage> [--digest <sha256\|none>]`: a store flow's stage file set | Whoever works a bead in that stage, in every depot that follows the flow, is shown the holder's text from then on, as what to do there. A flow a pack manages is no exception, and applying the pack does not undo it: `pack apply` keeps the holder's copy, whatever the pack moves. The card is strong (`code`), and the file stands after the device is removed. The approval keeps the text that stood in `<home>/stage-history/<sha256>`, and only the operator takes it back, by saving that file with `flow set-stage -f` (the card names it) or, where none stood, by removing the file in a terminal, and for a pack's flow also with `pack apply --take file/<name>` |
-| `flow copy-repo <depot>`: a depot's repository flows copied into the store | The flows of the depot's repository that govern its beads, and their stage files, as they stand on its base now, become flows of the store, and every bead of the depot follows those copies from then on: what lands in the repository's `.yardr/flows/` is not read for them while they stand, and they are changed by `flow set` and `flow set-stage` cards. The copies are what the repository says, not the holder's words. The card is strong (`code`), and the copies stand after the device is removed. Only the operator takes it back, with the commands the card names, which point each pointer at the repository again and leave the copies in the store, unused |
+| `flow set-stage <flow> <stage> [--digest <sha256\|none>]`: a store flow's stage file set | Whoever works a bead in that stage, in every depot that follows the flow, is shown the holder's text from then on, as what to do there. A flow a pack manages is no exception, and applying the pack does not undo it: `pack apply` keeps the holder's copy, whatever the pack moves. The card is strong (`code`), and the file stands after the device is removed. The approval keeps the text that stood in `<home>/stage-history/<sha256>`, and only the operator takes it back, by saving that file with `flow set-stage -f` (the card names it) or, where none stood, by removing the file in a terminal, and for a pack's flow also with `pack apply --take file/<name>`. A paired device of the operator makes the same save with no card (`PutStageFile`, [api.md](api.md#putstagefile)) and keeps the replaced text the same way; what that costs if the device is stolen is below |
+| `flow copy-repo <depot>`: a depot's repository flows copied into the store | The flows of the depot's repository that govern its beads, and their stage files, as they stand on its base now, become flows of the store, and every bead of the depot follows those copies from then on: what lands in the repository's `.yardr/flows/` is not read for them while they stand, and they are changed by `flow set` and `flow set-stage` cards. The copies are what the repository says, not the holder's words. The card is strong (`code`), and the copies stand after the device is removed. Only the operator takes it back, with the commands the card names, which point each pointer at the repository again and leave the copies in the store, unused. A paired device of the operator makes the same copy with no card (`CopyRepoFlows`, [api.md](api.md#copyrepoflows)); what that costs if the device is stolen is below |
 | `group add` without a prompt, or `group set` of `kind`, `model`, `dir`, `worktrees` or a named preset that keeps the agent's permission prompts; `crew set` of `kind`, `model`, `dir` or such a preset; `depot test`; `depot base`; `user set <user> notify=<source>`; a new `hook add` in the card's safe shape: run by the yardmaster on the holder's mail, within [the delegated bounds](#what-it-runs) and with no card | The change stands as the yardmaster's delegated run, recorded for the operator and mailed to them in the write that makes it. The holder needed no card and no approval, and the weight of the `group add`, `hook add` and `depot test` cards goes with the card. What it made (a group's or a member's new definition, a depot's new gate, where a user is told, a hook's endpoint) stands after the device is removed, until the operator has it taken back: with one more mail for the defining changes, and for the hook only by approving its removal card |
 | `pack apply` of an embedded pack, or of a packs-repository pack pinned to its digest: run by the yardmaster on the holder's mail, with no card | The pack's objects stand in the depot as an approval would have put them, whatever the card's bounds: a first install's groups, roles and scripts are among them, unread on any card. The digest, the plan and each updated object's diff are in the record. They stand after the device is removed, and no one command takes them back: a pinned re-apply to the digest that stood before it, or the record's diffs by hand. A flow, a stage file or a role the yard changed is no part of what the run sets: it is kept as the yard has it, and the run refuses a `--take`, which only the operator makes, in a terminal or on the `pack apply --take` card above |
 
@@ -1345,7 +1345,9 @@ made outlives the device. `yardr user device rm` ends further approvals at
 the device's next request and undoes none of what it approved: that has
 to be found and undone by hand. Each approval through a device is marked
 `via <device>` (below), which says where to look, and the card and `yardr
-prime --bead` name the command that takes each change back.
+prime --bead` name the command that takes each change back. It can also save
+a stage file and copy a depot's flows with no card (below), and those writes
+are marked the same way.
 
 What stands against it besides: the yard runs the command stored on the
 ask and takes no word of it from the call; an approval is refused when
@@ -1494,6 +1496,36 @@ id the batch carries ([api.md](api.md#telemetryshow)). The batch holds
 counts and fixed names only, and the holder learns no bead, no error's
 words and no actor's name from it. A device of any other user can do
 neither.
+
+**A stolen device of the operator can save a stage file and copy a depot's
+flows, with no card.** Until `yardr user device rm`, whoever holds its token
+can save the stage file of any stage of a store flow
+([api.md](api.md#putstagefile)). Whoever works a bead in that stage, in every
+depot that follows the flow, is shown the new text as what to do there, so the
+holder can tell the yard's agents what to do. The token can also copy the
+flows of a depot's repository into the yard ([api.md](api.md#copyrepoflows)),
+which points the depot at the copies, so that what lands in the repository
+stops governing it. Neither call installs a program or gives a credential, and
+neither is a card. What an agent is shown as its instructions still decides what
+it runs, which is why the cards are strong (`code`). Each call says
+`weighed: true`, which a stolen token says as easily as a person does.
+
+Several things stand against it. A device of any other user is answered as for
+a method the yard does not have. The pane of a crew member or of a bead's agent
+on the yard's socket is refused, and files the card instead. Both calls are
+taken only over https or from the yard's own machine, never from the router's
+peer. Down the link from the edge a hosted yard takes them, and any other yard
+takes them only in a call that came sealed: a plain call is refused, in words
+that tell the person to remove the device. Each write is marked `via <device>`
+(`via <device> via edge` down the link) on its `flow_set` and `flow_pointer_set`
+events.
+
+A save keeps the text it replaces in `<home>/stage-history/<sha256>`, and
+`yardr flow set-stage <flow> <stage> -f <file>` puts it back, which is the
+card's undo too. A copy is taken back with the commands it names (`yardr depot
+source <depot> flow depot`), which leave the copy in the store, unused.
+`yardr user device rm` refuses the device's next request and undoes nothing
+that it wrote.
 
 **A write says how it came.** What a device writes carries the device's
 name: the event has `via` in its data, and wherever the writer is shown the

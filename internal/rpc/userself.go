@@ -46,6 +46,8 @@ var selfArg = map[string][]string{
 	"ApproveSetup":         {"actor"},
 	"UninviteTeammate":     {"actor"},
 	"TelemetrySet":         {"actor"},
+	"PutStageFile":         {"actor"},
+	"CopyRepoFlows":        {"actor"},
 	"DevicePairCloseSelf":  {"user"},
 }
 

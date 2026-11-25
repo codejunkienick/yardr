@@ -157,7 +157,26 @@ func weighedRefusal(seq uint64, weight []AskWeight, weighed bool) error {
 	if len(weight) == 0 || weighed {
 		return nil
 	}
-	return fmt.Errorf("ask %d is %s: approve it where its weight is shown; a client sends \"weighed\": true once its person has passed its gate", seq, WeightWords(weight))
+	return fmt.Errorf("ask %d is %s: approve it where its weight is shown; %s", seq, WeightWords(weight), weighedSays)
+}
+
+// weighedSays is the tail of every refusal for a missing weighed, so that a
+// client reads one sentence whatever it was refused for.
+const weighedSays = `a client sends "weighed": true once its person has passed its gate`
+
+// weighedWriteRefusal is weighedRefusal for a write that is no ask: saving a
+// stage file and copying a depot's repository flows, which the yard weighs as
+// code, as the cards of the same names are, since what they write is what every
+// bead of a flow travels and is shown. doing names the write in the refusal.
+// It checks what a client says and proves nothing, as weighedRefusal does: it
+// keeps a client that has never heard of weight from saving what no person
+// passed. It is the first thing such a write asks, before it reads or writes
+// anything.
+func weighedWriteRefusal(doing string, weighed bool) error {
+	if weighed {
+		return nil
+	}
+	return fmt.Errorf("%s is %s: %s", doing, WeightWords([]AskWeight{{Class: WeightCode}}), weighedSays)
 }
 
 // StrongWeight reports whether the card's stored weight makes it a strong

@@ -1448,6 +1448,65 @@ var apiOperatorCalls = []apiCall{
 		},
 		after: "Deleting `<home>/telemetry.json` forgets the install id, a separate deliberate act; the next on mints a new one. To have the yard's data deleted, the operator sends the project the install id.",
 	},
+	{
+		method: "PutStageFile",
+		says:   "Saves the stage file of a stage of a store flow, as `yardr flow set-stage` does. The text goes in whole, by rename, at `<home>/flows/<flow>/<stage>.md` (a stage whose name holds a slash has its file a directory deeper), so a reader sees the old file or the new. Whoever works a bead in the stage, in every depot that follows the flow, is shown it from then on. `expect_digest` holds the save to the file as it was read. Left out, the save writes over whatever stands. `none` writes only where no file stands. The SHA-256 of the file in 64 hex digits, as `sha256sum` prints it, writes only where that file stands, so a file that moved since is refused, with both digests named. The text a save replaces is kept first, in `<home>/stage-history/<sha256>`, a read-only file named by the SHA-256 of the text, and a save that cannot keep it is refused. Saving that file puts the text back. A flow of a depot's repository has its stage files there, to be changed on a branch and committed, so it is refused with the path to edit, and so is a stage the flow does not have. A text whose `## Ask` section is broken is saved all the same, and the reply says where, since the operator may be part way through an edit. A stage file is weighty code, as the card of the same name is ([weighty cards](#weighty-cards)): without `weighed` the call is refused before anything is read or written. The operator makes it. On the socket the store refuses anyone else, whatever `actor` says, so a crew member or a bead's agent proposes the card instead. On the listener it is there for a device of the operator and for no other caller. The save is recorded as a `flow_set` event with the stage beside the flow and the digests of the text written and of the text replaced, with no prose. The event carries `via` when a device made the save. The operator's device token goes with the request, so the listener takes it only over https or from the yard's own machine, and never from the router's peer. Down the link from the edge it takes it from a device of the operator on a hosted yard, and on any other yard only in a call that came sealed ([TLS is yours](#tls-is-yours-and-the-clients-rule)).",
+		args: []field{
+			{"flow", "string", "the store flow whose stage file it is"},
+			{"stage", "string", "a stage the flow has"},
+			{"text", "string", "the stage file whole: UTF-8 text with something in it"},
+			{"expect_digest", "string", "what the save is held to: `none`, or the SHA-256 of the file as it was read; left out, whatever stands is written over"},
+			{"actor", "string", "who saves: the operator's name; a device calls as its user, and the field may be left out"},
+			{"weighed", "bool", "`true` once the person has seen that a stage file is weighty and has passed the client's gate; left out, `false`, and the call is refused before anything is written"},
+		},
+		requests: []string{
+			fmt.Sprintf(`{"flow":"default","stage":"shipped","text":"Ship it, say so, and name the commit.\n","expect_digest":%q,"actor":"jo","weighed":true}`, apiStageDigest("Ship it, and say so.\n")),
+			`{"flow":"default","stage":"new","text":"Build it, then ask.\n\n## Ask\nkind: choice\nquestion: Accept it?\ncontext:\n- Why.\ndone: Go.\nbacklog: No.\n","actor":"jo","weighed":true}`,
+		},
+		fields: []field{
+			{"path", "string", "the stage file's path on the yard's machine"},
+			{"text", "string", "the text now standing, whole"},
+			{"digest", "string", "the SHA-256 of `text` in lower case hex: what the next save's `expect_digest` holds it to"},
+			{"prior_digest", "string?", "the SHA-256 of the text this save replaced; absent where it replaced none (it created the file, or wrote the text that stood)"},
+			{"prior_text", "string?", "the text this save replaced, whole, which `<home>/stage-history/<prior_digest>` keeps; absent as `prior_digest` is"},
+			{"warning", "string?", "where `text` breaks its `## Ask` section, as `<path>: <why>`; absent where it does not. A save is never refused for it"},
+		},
+		after: "A save of the text that stands replaces nothing and keeps nothing. When the call ends without a reply (the server went away), a client cannot know whether the file was saved: say \"the yard did not answer; read the stage file again\", never \"saved\", and read [`Line`](#line) again, whose `stage_file` carries the digest to hold the next save to.",
+	},
+	{
+		method: "CopyRepoFlows",
+		says:   "Copies the flows of a depot's repository that govern its beads into the store, as `yardr flow copy-repo` does, so they can be changed in the yard. The depot's own flow (`default.flow`), the flow of each type that has a file (`type/<type>.flow`) and a named flow a pointer of the depot leads to become store flows, named `<depot>.default` and `<depot>.<type>` (with `.local` after a name the repository has a flow of). Their stage files are written under `<home>/flows/<flow>/`, and the depot and each of those types are pointed at the copies. It is all one write, so no bead is ever governed by half of the copy. A flow of the depot that governs from the store already stays as it is, and a depot with nothing to copy is refused, with what it has named. A store flow of a copy's name that no depot, type or open bead follows, and that no pack manages, is what an earlier copy left when it was switched back, and the new copy replaces it with its stage files. One that is followed, or a pack's, refuses the whole copy and names who follows it; nothing is written. What lands in the repository's `.yardr/flows/` afterwards does not reach the flows copied. `back` is the command that points each pointer at the repository again, and leaves the copy in the store, unused. A copy is weighty code, as the card of the same name is ([weighty cards](#weighty-cards)): without `weighed` the call is refused before the repository is read or anything is written. The operator makes it. On the socket the store refuses anyone else, whatever `actor` says, so a crew member or a bead's agent proposes the card instead. On the listener it is there for a device of the operator and for no other caller. Each flow copied is recorded as a `flow_set` event and a `flow_pointer_set` event, each with `via` when a device made the copy. The listener takes the call as it takes `PutStageFile`: over https or from the yard's own machine, never from the router's peer, and down the link from the edge on a hosted yard or, on any other yard, only in a call that came sealed ([TLS is yours](#tls-is-yours-and-the-clients-rule)).",
+		args: []field{
+			{"depot", "string", "the depot whose repository's flows are copied"},
+			{"actor", "string", "who copies: the operator's name; a device calls as its user, and the field may be left out"},
+			{"weighed", "bool", "`true` once the person has seen that a copy of flows is weighty and has passed the client's gate; left out, `false`, and the call is refused before anything is read or written"},
+		},
+		requests: []string{
+			`{"depot":"linegit","actor":"jo","weighed":true}`,
+			`{"depot":"kit","actor":"jo","weighed":true}`,
+			`{"depot":"kit","actor":"jo","weighed":true}`,
+		},
+		fields: []field{
+			{"depot", "string", "the depot whose flows were copied"},
+			{"source", "string", "where they were read: `repo@<short commit>` of the depot's base, or `repo (directory)` where its repository is a directory"},
+			{"flows", "array", "each flow copied, the depot's own first and then one for each type, by type"},
+			{"flows[].type", "string?", "the bead type the flow governs; absent on the depot's own flow"},
+			{"flows[].from", "string", "its file in the repository"},
+			{"flows[].flow", "string", "the store flow it was copied to"},
+			{"flows[].stage_files", "number", "how many stage files were written under `<home>/flows/<flow>/`: those with text in them, of a stage the flow has"},
+			{"flows[].replaced", "bool?", "`true` where an unused earlier copy under that name was replaced, its stage files with it; absent otherwise"},
+			{"flows[].back", "string", "the command that points this pointer at the repository again, in a line to show as it is"},
+			{"kept", "array of string?", "the places that governed the depot from the store already and were left as they are: `default`, or `type/<type>`; absent where there were none"},
+		},
+		after: "A depot's pointers are copied together, so run the `back` commands in the order of `flows`: the depot's pointer stands in front of the repository's files, so it is pointed back first. The flows, pointers and events are one write, all in place or none. When the call ends without a reply (the server went away), a client cannot know whether the copy was made: say \"the yard did not answer; read the depot's flows again\", never \"copied\", and read [`Line`](#line) of the depot again, which says which flow governs each stage.",
+	},
+}
+
+// apiStageDigest is the SHA-256 in lower case hex of a stage file's text,
+// as PutStageFile's expect_digest names it.
+func apiStageDigest(text string) string {
+	sum := sha256.Sum256([]byte(text))
+	return hex.EncodeToString(sum[:])
 }
 
 // apiEvent is one kind of event of the doc: is picks it from the stream.
@@ -2545,6 +2604,42 @@ func apiBlockedByFixture(t *testing.T, st *store.Store) {
 	}
 }
 
+// apiCopyFixtures sets the yard for the CopyRepoFlows example whose request
+// is number i. The first copies a git depot's own flow (apiLineFixtures made
+// it). The second copies a directory depot's own flow and its release type's
+// together. The third copies that depot again once its own pointer has been
+// switched back, so that the unused copy that leaves is replaced, and the
+// release type, which still has its pointer, is kept.
+func apiCopyFixtures(t *testing.T, st *store.Store, i int) {
+	t.Helper()
+	ctx := context.Background()
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if i == 1 {
+		kit := filepath.Join(t.TempDir(), "kit")
+		for name, text := range map[string]string{
+			".yardr/flows/default.flow":          "plan -> build\nbuild -> done\ndone terminal\n",
+			".yardr/flows/default/plan.md":       "Plan the work.\n",
+			".yardr/flows/default/build.md":      "Build the work.\n",
+			".yardr/flows/default/stray-note.md": "Of no stage of the flow.\n",
+			".yardr/flows/type/release.flow":     "plan -> ship\nship -> done\ndone terminal\n",
+			".yardr/flows/type/release/ship.md":  "Ship the release.\n",
+			".yardr/flows/type/release/plan.md":  " \n",
+		} {
+			must(os.MkdirAll(filepath.Join(kit, filepath.Dir(name)), 0o755))
+			must(os.WriteFile(filepath.Join(kit, name), []byte(text), 0o644))
+		}
+		must(st.PutDepot(ctx, store.Depot{Name: "kit", Kind: store.DepotDir, Path: kit}, "jo"))
+		return
+	}
+	// What `yardr depot source kit flow depot` does.
+	must(st.SetFlowPointer(ctx, "kit", "", "", "jo"))
+}
+
 // apiOwnWorkFixtures files jo's requests for the RewordBead and WithdrawBead
 // examples after the earlier examples have read the yard, so the listing
 // counts stand before the last example withdraws all three requests.
@@ -2664,7 +2759,7 @@ func apiLineFixtures(t *testing.T, st *store.Store) {
 		{"new", "Build it.\n\n## Ask\nkind: choice\nquestion: Accept it?\ncontext:\n- Why.\ndone: Go.\nbacklog: No.\n"},
 		{"shipped", "Ship it, and say so.\n"},
 	} {
-		_, err = st.PutStageFile(ctx, "default", f[0], f[1], "", "jo")
+		_, err = st.PutStageFile(ctx, "default", f[0], f[1], "", "jo", true)
 		must(err)
 	}
 }
@@ -2890,6 +2985,9 @@ func runAPI(t *testing.T, network bool) *apiRun {
 			if c.method == "RewordBead" && i == 0 {
 				apiOwnWorkFixtures(t, st)
 			}
+			if c.method == "CopyRepoFlows" && i > 0 {
+				apiCopyFixtures(t, st, i)
+			}
 			if c.method == "DevicePairCloseSelf" {
 				// The pairing it ends is opened by approving its own ask
 				// here, unrecorded: the recorded approvals run after
@@ -3059,8 +3157,8 @@ func TestCallsAreTheDocs(t *testing.T) {
 	t.Run("Calls", func(t *testing.T) { callsAreTheDocs(t, "Calls", Calls, apiCalls) })
 	t.Run("OperatorCalls", func(t *testing.T) { callsAreTheDocs(t, "OperatorCalls", OperatorCalls, apiOperatorCalls) })
 	// What the listener serves every device is Calls, as it was before
-	// there was a second list, and a device of the operator ten of the
-	// fourteen calls of OperatorCalls besides; the socket's own four it
+	// there was a second list, and a device of the operator twelve of the
+	// sixteen calls of OperatorCalls besides; the socket's own four it
 	// answers as no method at all, and the socket answers so the one call
 	// of Calls a device's token alone makes (listenerOnly): a call is
 	// added to either on purpose, here too.
@@ -3630,6 +3728,12 @@ func callsDoc(run *apiRun, calls []apiCall) []string {
 			shown = scrubUUIDs(shown)
 			if c.method == "Line" {
 				shown = scrubLinePaths(scrubRouteIDs(shown))
+			}
+			if c.method == "PutStageFile" {
+				shown = lineHomeStagePath.ReplaceAllString(shown, exampleHome+"/flows/$2")
+			}
+			if c.method == "CopyRepoFlows" {
+				shown = lineRepoSource.ReplaceAllString(shown, `"source": "repo@abcdef0"`)
 			}
 			if c.method == "Prime" {
 				shown = primeRulePath.ReplaceAllString(shown, `"path": "/home/jo/notes/$1"`)

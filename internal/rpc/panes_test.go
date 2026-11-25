@@ -102,11 +102,11 @@ func TestSocketRefusesABeadsPaneWhatIsNotAnAgents(t *testing.T) {
 			return err
 		}},
 		{"PutStageFile", func() error {
-			_, err := c.PutStageFile(ctx, "trains", "open", "Skip the review.\n", "", "jo")
+			_, err := c.PutStageFile(ctx, "trains", "open", "Skip the review.\n", "", "jo", true)
 			return err
 		}},
 		{"CopyRepoFlows", func() error {
-			_, err := c.CopyRepoFlows(ctx, "yard", "jo")
+			_, err := c.CopyRepoFlows(ctx, "yard", "jo", true)
 			return err
 		}},
 		{"SetFlowPointer", func() error { return c.SetFlowPointer(ctx, "", "", "trains", "jo") }},
@@ -211,14 +211,14 @@ func TestSocketServesACrewPaneTheYardsRouting(t *testing.T) {
 	// What a stage says is the operator's, a crew member's own flow
 	// included: its call is served, and the store holds the write to the
 	// operator, whom the pane's name cannot be.
-	if _, err := c.PutStageFile(ctx, "trains", "open", "Skip the review.\n", "", "jo"); err == nil ||
+	if _, err := c.PutStageFile(ctx, "trains", "open", "Skip the review.\n", "", "jo", true); err == nil ||
 		!strings.Contains(err.Error(), "only the operator (jo) may change a flow's stages; this is yardmaster") {
 		t.Errorf("PutStageFile from a crew pane = %v, want it the operator's alone", err)
 	}
 	if sf, err := store.HomeStageFile(home, "trains", "open"); err != nil || sf != nil {
 		t.Errorf("the refused PutStageFile left the stage file %+v, %v", sf, err)
 	}
-	if _, err := st.PutStageFile(ctx, "trains", "open", "Work it.\n", "none", "jo"); err != nil {
+	if _, err := st.PutStageFile(ctx, "trains", "open", "Work it.\n", "none", "jo", true); err != nil {
 		t.Errorf("the operator's own PutStageFile: %v", err)
 	}
 	// So is copying a depot's repository flows into the store, which the
@@ -231,14 +231,14 @@ func TestSocketServesACrewPaneTheYardsRouting(t *testing.T) {
 		t.Fatal(err)
 	}
 	must(st.PutDepot(ctx, store.Depot{Name: "web", Kind: store.DepotDir, Path: repo}, "jo"))
-	if _, err := c.CopyRepoFlows(ctx, "web", "jo"); err == nil ||
+	if _, err := c.CopyRepoFlows(ctx, "web", "jo", true); err == nil ||
 		!strings.Contains(err.Error(), "only the operator (jo) may change a flow's stages; this is yardmaster") {
 		t.Errorf("CopyRepoFlows from a crew pane = %v, want it the operator's alone", err)
 	}
 	if _, err := st.GetFlow(ctx, "web.default"); err == nil {
 		t.Error("the refused CopyRepoFlows stored a flow")
 	}
-	if _, err := st.CopyRepoFlows(ctx, "web", "jo"); err != nil {
+	if _, err := st.CopyRepoFlows(ctx, "web", "jo", true); err != nil {
 		t.Errorf("the operator's own CopyRepoFlows: %v", err)
 	}
 	if err := c.DeletePeer(ctx, "far", "jo"); err == nil || !strings.HasPrefix(err.Error(), "DeletePeer is the operator's alone") {

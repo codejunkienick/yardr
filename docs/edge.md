@@ -250,6 +250,15 @@ Teammates cross with them too: `Teammates` and `UninviteTeammate` are taken
 from a paired device of the operator down the link, as from the yard's own
 machine, so the operator's paired device reads the yard's teammates and
 files a removal through the edge.
+The operator's own writes, a stage file's save and a copy of a depot's flows
+(`PutStageFile`, `CopyRepoFlows`), need no card and cross the link too. A
+hosted yard takes them from a paired device of the operator. Any other yard
+takes them only when the call came sealed, because the edge reads the token of
+a plain call and with it could save text that the yard's agents are then told.
+A plain call down the link of such a yard is refused, in words that name a
+sealed device (pairing the device with the QR makes one) and the yard's own
+machine, and say the token crossed in plain. `yardr user device rm` removes the
+device.
 On a connected yard a plain call gives no other secret: model credentials such
 as an API key, and hook signing secrets, are answered from a sealed device
 (above) or at the yard's own machine, as on a LAN without TLS, and `GiveSecret`
