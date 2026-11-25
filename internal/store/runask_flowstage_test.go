@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // stageFlow is the store flow code: its stages, one of whose names holds a
@@ -143,13 +144,14 @@ func TestRunAskFlowSetStageAddsAndReplaces(t *testing.T) {
 		"replaces the stage file of stage work of the flow code whole: "+file,
 		"The text that stands, whole:", "Build it.", "Tests pass.",
 		"On approval the file holds the text below, whole:", "Build it.", "Tests pass, and the build is green.")
-	if want := "yardr flow set-stage code work -f <file> with the text that stands, carried whole as this card shows it"; r.Ask.Run.Back != want {
+	if want := "yardr flow set-stage code work -f " + y.historyPath(text) + ", where the yard keeps the text that stands once this is approved"; r.Ask.Run.Back != want {
 		t.Errorf("taken back by %q, want %q", r.Ask.Run.Back, want)
 	}
 	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err != nil {
 		t.Fatal(err)
 	}
 	y.stageIs(t, "work", next, 0o600)
+	y.historyIs(t, text)
 
 	// Replaced held to the digest of the file as it was read.
 	last := "Build it, then say so.\n"
@@ -161,8 +163,10 @@ func TestRunAskFlowSetStageAddsAndReplaces(t *testing.T) {
 		t.Fatal(err)
 	}
 	y.stageIs(t, "work", last, 0o600)
+	y.historyIs(t, next)
 
-	// A file with nothing in it is none: added at the mode it stands in.
+	// A file with nothing in it is none: added at the mode it stands in, and
+	// it leaves nothing to keep.
 	y.putStage(t, "work", " \n", 0o640)
 	seq = y.ask(t, stageAsk(text, "code", "work", "--digest", "none"), "yardmaster")
 	strongHas(t, y.asked(t, seq).Ask.Run.Does, "adds the stage file of stage work")
@@ -181,8 +185,23 @@ func TestRunAskFlowSetStageAddsAndReplaces(t *testing.T) {
 	if info, err := os.Stat(filepath.Dir(y.stagePath("qa/smoke"))); err != nil || !info.IsDir() {
 		t.Errorf("the directory of qa/smoke: %v, %v", info, err)
 	}
-	if got := len(y.stageEvents(t)); got != 5 {
-		t.Errorf("%d flow_set events of a stage file, want one for each of the five approvals", got)
+	// Replaced, it is kept in the one flat directory, not a directory deeper.
+	seq = y.ask(t, stageAsk("Smoke it twice.\n", "code", "qa/smoke", "--digest", sha256Hex("Smoke it.\n")), "yardmaster")
+	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err != nil {
+		t.Fatal(err)
+	}
+	y.stageIs(t, "qa/smoke", "Smoke it twice.\n", 0o644)
+	y.historyIs(t, "Smoke it.\n")
+	// What was replaced is kept, and nothing for a file added where none stood
+	// or where one stood with nothing in it.
+	y.historyHolds(t, text, next, "Smoke it.\n")
+	// Each write says which text it wrote and which it replaced, by digest and
+	// no more.
+	if want := []string{
+		"work " + sha8(text) + " <- -", "work " + sha8(next) + " <- " + sha8(text), "work " + sha8(last) + " <- " + sha8(next),
+		"work " + sha8(text) + " <- -", "qa/smoke " + sha8("Smoke it.\n") + " <- -", "qa/smoke " + sha8("Smoke it twice.\n") + " <- " + sha8("Smoke it.\n"),
+	}; !slices.Equal(y.stageWrites(t), want) {
+		t.Errorf("the approvals recorded\n%q\nwant\n%q", y.stageWrites(t), want)
 	}
 	// What each approval read was the file itself: the yard's own temporary
 	// files are not left beside it.
@@ -430,7 +449,7 @@ func TestRunAskFlowSetStageSaysWhatPackApplyDoes(t *testing.T) {
 		t.Errorf("line 2 = %q, want %q", r.Ask.Run.Does[2], want)
 	}
 	for _, want := range []string{
-		"yardr flow set-stage code work -f <file> with the text that stands",
+		"yardr flow set-stage code work -f " + y.historyPath("Old.\n"),
 		"; or, for the pack's own copy instead, yardr pack apply starter --depot web --take file/<name> in a terminal",
 	} {
 		if !strings.Contains(r.Ask.Run.Back, want) {
@@ -463,14 +482,22 @@ func TestRunAskFlowSetStageWarnsOfABrokenAsk(t *testing.T) {
 		{strings.Repeat("x\n", MaxRunFlow/2+1), fmt.Sprintf("it is %d bytes, and a card shows at most %d", MaxRunFlow+2, MaxRunFlow)},
 		{"Old \x1b[31mtext\n", "it is not text a card shows as written"},
 		{"Old\r\ntext\r\n", "it is not text a card shows as written"},
+		{"Old \xff text\n", "it is not text a card shows as written"},
 	} {
 		y.putStage(t, "work", c.stands, 0o644)
 		seq := y.ask(t, stageAsk("New.\n", "code", "work"), "yardmaster")
 		r := y.asked(t, seq)
 		strongHas(t, r.Ask.Run.Does, "replaces the stage file", "This card cannot show the standing stage file: "+c.why+".", "On approval the file holds the text below, whole:", "New.")
 		strongLacks(t, r.Ask.Run.Does, "The text that stands, whole:")
-		if !strings.Contains(r.Ask.Run.Back, "which this card cannot show: keep a copy of "+y.stagePath("work")+" before approving") {
-			t.Errorf("taken back by %q", r.Ask.Run.Back)
+		// Shown or not, the approval keeps the text that stands, so that is what
+		// puts it back: by a save of that file, or, for bytes that are no text
+		// a save takes, by a copy.
+		want := "yardr flow set-stage code work -f " + y.historyPath(c.stands) + ", where the yard keeps the text that stands once this is approved"
+		if !utf8.ValidString(c.stands) {
+			want = "cp " + y.historyPath(c.stands) + " " + y.stagePath("work") + " in a terminal, where the yard keeps the text that stands once this is approved: it is not valid UTF-8"
+		}
+		if !strings.HasPrefix(r.Ask.Run.Back, want) {
+			t.Errorf("taken back by %q, want it to begin %q", r.Ask.Run.Back, want)
 		}
 		// Held to the file that stands, shown or not.
 		y.putStage(t, "work", c.stands+"more\n", 0o644)
@@ -603,6 +630,93 @@ func TestPutStageFileRunTwiceEndsTheSame(t *testing.T) {
 		t.Errorf("retried approval printed %+v, want %q", done, want)
 	}
 	y.stageIs(t, "qa/smoke", "Smoke it.\n", 0o644)
+
+	// The same where a write replaces a file: the retry tells what its first
+	// run replaced, in the event and in the answer, finds the copy that run
+	// kept and makes no other, and a separate call is still held to what it
+	// names even where the file holds the text already.
+	once, twice := "Build it.\n", "Build it twice.\n"
+	var got *LineStageFile
+	runs = 0
+	err = y.write(func(w *wtx) error {
+		runs++
+		var err error
+		got, err = w.putStageFile(y.ctx, "code", "work", twice, sha256Hex(once), "mckean")
+		if err != nil {
+			return err
+		}
+		if runs == 1 {
+			return boom
+		}
+		return nil
+	})
+	if err != nil || runs != 2 {
+		t.Fatalf("the replacement ran %d times and ended %v, want 2 runs and nil", runs, err)
+	}
+	want := LineStageFile{Path: y.stagePath("work"), Text: twice, Digest: sha256Hex(twice), PriorDigest: sha256Hex(once), PriorText: once}
+	if got == nil || *got != want {
+		t.Errorf("the retried replacement answered %+v, want %+v", got, want)
+	}
+	y.stageIs(t, "work", twice, 0o644)
+	y.historyHolds(t, once)
+	for _, c := range []struct{ expect, want string }{
+		{stageNone, "though --digest none says none does"},
+		{sha256Hex(once), "not the " + sha256Hex(once)},
+	} {
+		if _, err := y.PutStageFile(y.ctx, "code", "work", twice, c.expect, "mckean"); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("separate PutStageFile held to %q with identical text = %v, want refusal", c.expect, err)
+		}
+	}
+	// Held to the file that stands, it succeeds and replaces nothing, so it
+	// tells nothing was kept.
+	if got, err := y.PutStageFile(y.ctx, "code", "work", twice, sha256Hex(twice), "mckean"); err != nil || got.PriorDigest != "" || got.PriorText != "" {
+		t.Errorf("separate PutStageFile held to the matching digest with identical text = %+v, %v, want no prior", got, err)
+	}
+	y.historyHolds(t, once)
+
+	// A batch retry of the approval of a card that replaces: the same.
+	seq = y.ask(t, stageAsk("Smoke it twice.\n", "code", "qa/smoke", "--digest", sha256Hex("Smoke it.\n")), "yardmaster")
+	runs = 0
+	done = nil
+	err = y.write(func(w *wtx) error {
+		runs++
+		var err error
+		done, err = w.approveAsk(y.ctx, y.bead, seq, "mckean", true, nil)
+		if err != nil {
+			return err
+		}
+		if runs == 1 {
+			return boom
+		}
+		return nil
+	})
+	if err != nil || runs != 2 {
+		t.Fatalf("the replacing approval ran %d times and ended %v, want 2 runs and nil", runs, err)
+	}
+	if want := "stage file code/qa/smoke: " + y.stagePath("qa/smoke"); done == nil || done.Result != want {
+		t.Errorf("retried approval printed %+v, want %q", done, want)
+	}
+	y.stageIs(t, "qa/smoke", "Smoke it twice.\n", 0o644)
+	y.historyHolds(t, once, "Smoke it.\n")
+
+	// Another writer's identical text still stales an approval, retry or not:
+	// the file is not the one the card saw, and nothing is kept or written.
+	thrice := "Build it thrice.\n"
+	seq = y.ask(t, stageAsk(thrice, "code", "work"), "yardmaster")
+	if _, err := y.PutStageFile(y.ctx, "code", "work", thrice, "", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	y.historyHolds(t, once, "Smoke it.\n", twice)
+	y.refusedStale(t, seq, "was written when the stage file of stage work of the flow code was another: it was changed since")
+	y.historyHolds(t, once, "Smoke it.\n", twice)
+
+	if want := []string{
+		"work " + sha8(once) + " <- -", "work " + sha8(once) + " <- -", "qa/smoke " + sha8("Smoke it.\n") + " <- -",
+		"work " + sha8(twice) + " <- " + sha8(once), "work " + sha8(twice) + " <- -",
+		"qa/smoke " + sha8("Smoke it twice.\n") + " <- " + sha8("Smoke it.\n"), "work " + sha8(thrice) + " <- " + sha8(twice),
+	}; !slices.Equal(y.stageWrites(t), want) {
+		t.Errorf("the writes recorded\n%q\nwant\n%q", y.stageWrites(t), want)
+	}
 }
 
 // A stage file's write is a flow_set too, so footplate's Line read moves

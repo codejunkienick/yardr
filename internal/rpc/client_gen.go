@@ -326,8 +326,8 @@ func (c *Client) DeleteRoute(ctx context.Context, id, actor string) error {
 func (c *Client) PutFlow(ctx context.Context, f store.Flow, actor string) (*store.Flow, error) {
 	return callV[*store.Flow](c, ctx, "PutFlow", f, actor)
 }
-func (c *Client) PutStageFile(ctx context.Context, flow, stage, text, expectDigest, actor string) (*store.StageFile, error) {
-	return callV[*store.StageFile](c, ctx, "PutStageFile", flow, stage, text, expectDigest, actor)
+func (c *Client) PutStageFile(ctx context.Context, flow, stage, text, expectDigest, actor string) (*store.LineStageFile, error) {
+	return callV[*store.LineStageFile](c, ctx, "PutStageFile", flow, stage, text, expectDigest, actor)
 }
 func (c *Client) CopyRepoFlows(ctx context.Context, depot, actor string) (*store.CopiedFlows, error) {
 	return callV[*store.CopiedFlows](c, ctx, "CopyRepoFlows", depot, actor)

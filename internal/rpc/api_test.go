@@ -1212,7 +1212,7 @@ var apiOperatorCalls = []apiCall{
 	},
 	{
 		method: "Line",
-		says:   "Reads one depot's line: every flow that governs the depot, the depot's own first and then one per type, with its stages in the flow's order, who serves each stage, its stage file and the prompts of its groups and of the crew, whole. It changes nothing. The representative route of a stage is the route a probe bead of the depot, of the flow's type (the default type where the flow has none) at the default priority with no labels reading as the operator's would take, answered whole; every other effective route of the stage stands behind it with its id, scope, filters and first group, so a stage whose labelled, urgent or another user's beads take a different rule shows that rule. A rule's scope is `this depot's own` where it names the depot and `yard-wide` where it names none: a yard-wide rule serves every depot with no own route of its match key. Each filter is named and shown as unset where it is unset: an empty `type` takes any type, empty `labels` no label, an empty `priority` any priority, and an empty `originator` the operator's beads alone. A prompt a card cannot carry says why, by the card's own rules, and one that cannot be read names the paths tried and fails nothing else; no env file path stands anywhere in the answer. It is the operator's to read: on the socket the operator's alone, and on the listener there for a device of the operator and for no other caller. A `cmd` and a prompt are the operator's to read alone, so the listener takes it only over https or from the yard's own machine, like the other calls of this list, and down the link from the edge from a paired device of the operator, as an approval ([edge.md](edge.md#footplate-through-the-link)). A depot the yard has not is `not-found`.",
+		says:   "Reads one depot's line: every flow that governs the depot, the depot's own first and then one per type, with its stages in the flow's order, who serves each stage, its stage file and the prompts of its groups and of the crew, whole. A stage file carries the digest a save of it is held to and, where its `## Ask` section is broken, the warning of it; a store flow's also carries the text its latest save replaced, which the yard keeps in its `stage-history/` directory, so that one more save puts it back. It changes nothing. The representative route of a stage is the route a probe bead of the depot, of the flow's type (the default type where the flow has none) at the default priority with no labels reading as the operator's would take, answered whole; every other effective route of the stage stands behind it with its id, scope, filters and first group, so a stage whose labelled, urgent or another user's beads take a different rule shows that rule. A rule's scope is `this depot's own` where it names the depot and `yard-wide` where it names none: a yard-wide rule serves every depot with no own route of its match key. Each filter is named and shown as unset where it is unset: an empty `type` takes any type, empty `labels` no label, an empty `priority` any priority, and an empty `originator` the operator's beads alone. A prompt a card cannot carry says why, by the card's own rules, and one that cannot be read names the paths tried and fails nothing else; no env file path stands anywhere in the answer. It is the operator's to read: on the socket the operator's alone, and on the listener there for a device of the operator and for no other caller. A `cmd` and a prompt are the operator's to read alone, so the listener takes it only over https or from the yard's own machine, like the other calls of this list, and down the link from the edge from a paired device of the operator, as an approval ([edge.md](edge.md#footplate-through-the-link)). A depot the yard has not is `not-found`.",
 		args: []field{
 			{"depot", "string", "the depot whose line is read"},
 		},
@@ -1276,6 +1276,10 @@ var apiOperatorCalls = []apiCall{
 			{"flows[].stages[].stage_file", "object?", "the stage's file where it has one; absent where it has none"},
 			{"flows[].stages[].stage_file.path", "string", "the file, as `flow show` names it"},
 			{"flows[].stages[].stage_file.text", "string", "the file whole"},
+			{"flows[].stages[].stage_file.digest", "string", "the SHA-256 of `text` in lower case hex, as `sha256sum` prints it: what a save of the file is held to (`--digest` of `yardr flow set-stage`)"},
+			{"flows[].stages[].stage_file.prior_digest", "string?", "the SHA-256 of the text the latest save of a store flow's stage file replaced, which the yard keeps (`<home>/stage-history/<sha256>`); absent where that save created the file, where the kept text is gone, is not what its name says or is longer than 32 KiB, and on a flow of a depot's repository"},
+			{"flows[].stages[].stage_file.prior_text", "string?", "that text whole, as `yardr flow set-stage -f <home>/stage-history/<sha256>` puts it back; absent where `prior_digest` is"},
+			{"flows[].stages[].stage_file.warning", "string?", "where the file's `## Ask` section is broken, as `<path>: <why>`, which `yardr flow show` warns of too; a save is never refused for it; absent where it is not"},
 			{"crew", "array", "the crew members, each with its prompt where its config names one (as a stage's prompt says it); a member with none carries its name alone"},
 			{"crew[].name", "string", "the crew member"},
 			{"crew[].prompt", "object?", "the crew member's prompt where its config names one; absent otherwise"},
@@ -2652,6 +2656,17 @@ func apiLineFixtures(t *testing.T, st *store.Store) {
 	must(err)
 	_, err = st.PutCrew(ctx, store.CrewMember{Name: "prompt-missing", Runner: "herdr", Config: map[string]any{"kind": "claude", "prompt": filepath.Join(home, "roles", "crew-missing.md")}}, "jo")
 	must(err)
+	// The stage files of the yard's store flow default: one saved twice, so
+	// that its Line says the text the second save replaced, and one whose
+	// ## Ask section is broken, so that it says so.
+	for _, f := range [][2]string{
+		{"shipped", "Ship it.\n"},
+		{"new", "Build it.\n\n## Ask\nkind: choice\nquestion: Accept it?\ncontext:\n- Why.\ndone: Go.\nbacklog: No.\n"},
+		{"shipped", "Ship it, and say so.\n"},
+	} {
+		_, err = st.PutStageFile(ctx, "default", f[0], f[1], "", "jo")
+		must(err)
+	}
 }
 
 // apiHookSource is the declaration of a source of the doc's yard whose
@@ -3525,6 +3540,10 @@ var lineRepoSource = regexp.MustCompile(`"source": "repo@[0-9a-f]+"`)
 var lineRepoCommit = regexp.MustCompile(`"commit": "[0-9a-f]{40}"`)
 var lineHomeRolePath = regexp.MustCompile(`(/[^/" ]+)+/roles/([^/" ]+)`)
 
+// lineHomeStagePath is a store flow's stage file under the yard's home, in a
+// path of its own or in the warning that names it.
+var lineHomeStagePath = regexp.MustCompile(`(/[^/" ]+)+/flows/([^/" ]+/[^/" ]+\.md)`)
+
 var (
 	// A Line reply names two paths of the test's own making: the dir
 	// depot's directory and the yard-written prompt under its home.
@@ -3536,6 +3555,7 @@ var (
 func scrubLinePaths(s string) string {
 	s = lineDirectory.ReplaceAllString(s, `"directory": "/home/jo/notes"`)
 	s = lineHomeRolePath.ReplaceAllString(s, exampleHome+"/roles/$2")
+	s = lineHomeStagePath.ReplaceAllString(s, exampleHome+"/flows/$2")
 	s = lineRepoSource.ReplaceAllString(s, `"source": "repo@abcdef0"`)
 	return lineRepoCommit.ReplaceAllString(s, `"commit": "0123456789abcdef0123456789abcdef01234567"`)
 }

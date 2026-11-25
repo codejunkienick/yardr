@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"unicode/utf8"
 )
 
 const flowSetStageUse = "yardr flow set-stage <flow> <stage> [--digest <sha256|none>]"
@@ -171,11 +172,18 @@ func (w *wtx) flowSetStageCard(run AskRun, asking bool) (AskRun, error) {
 				why = fmt.Sprintf("it is %d bytes, and a card shows at most %d", len(st.text), MaxRunFlow)
 			}
 			does = append(does, fmt.Sprintf("This card cannot show the standing stage file: %s.", why))
-			back = fmt.Sprintf("yardr flow set-stage %s %s -f <file> with the text that stands, which this card cannot show: keep a copy of %s before approving", spec.flow, spec.stage, target)
 		} else {
 			does = append(does, "The text that stands, whole:")
 			does = append(does, textLines(st.text)...)
-			back = fmt.Sprintf("yardr flow set-stage %s %s -f <file> with the text that stands, carried whole as this card shows it", spec.flow, spec.stage)
+		}
+		// Shown or not, the approval keeps the text that stands in the home's
+		// stage history before it replaces it (putStageFile), and one more save
+		// of that file puts it back. A save takes text alone (stageText), so for
+		// a file that is no UTF-8 the way back is a copy.
+		if utf8.ValidString(st.text) {
+			back = fmt.Sprintf("yardr flow set-stage %s %s -f %s, where the yard keeps the text that stands once this is approved", spec.flow, spec.stage, st.history)
+		} else {
+			back = fmt.Sprintf("cp %s %s in a terminal, where the yard keeps the text that stands once this is approved: it is not valid UTF-8, which yardr flow set-stage does not take", st.history, target)
 		}
 	}
 	does = append(does, "On approval the file holds the text below, whole:")
@@ -231,7 +239,7 @@ func stagePackWords(pack, depot string) (lines []string, door string) {
 func (w *wtx) flowSetStageStale(seq uint64, was, now AskRun) error {
 	flow, stage, _ := flowSetStageOf(was.Argv)
 	if key := "stage " + flow + " " + stage; was.Seen[key] != now.Seen[key] {
-		if w.stageWrote != nil && *w.stageWrote == key && now.Seen[key] == stageDigest([]byte(was.Flow)) {
+		if w.stageWrote != nil && w.stageWrote.key == key && now.Seen[key] == stageDigest([]byte(was.Flow)) {
 			return nil
 		}
 		e := lastEvent(w.Tx, "flow_set", func(e Event) bool { return e.Data["flow"] == flow && e.Data["stage"] == stage })

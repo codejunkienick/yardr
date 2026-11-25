@@ -106,6 +106,10 @@ type stageStand struct {
 	mode fs.FileMode
 	// text is what the file holds, "" where none stands.
 	text string
+	// history is where that text is kept once a write replaces it
+	// (archiveStageFile), under the home as it is given, as path is: "" where
+	// none stands.
+	history string
 }
 
 // standStage reads what stands at the stage file of stage in the store flow
@@ -162,6 +166,7 @@ func standStage(home, flow, stage string) (*stageStand, error) {
 		return nil, fmt.Errorf("%s: %s: %s", subject, st.path, OneLine(err.Error()))
 	}
 	st.digest, st.mode, st.text = stageDigest(raw), info.Mode().Perm(), string(raw)
+	st.history = StageHistoryPath(named, st.digest)
 	return st, nil
 }
 

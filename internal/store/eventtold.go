@@ -209,7 +209,7 @@ var eventDataTold = map[string][]string{
 	// are held.
 	"depot_updated":        {"depot", "kind", "base", "approved"},
 	"depot_removed":        {"depot", "flow_pointers", "routes"},
-	"flow_set":             {"flow", "stage"},
+	"flow_set":             {"flow", "stage", "digest", "prev_digest"},
 	"flow_removed":         {"flow"},
 	"flow_pointer_set":     {"depot", "flow", "type"},
 	"flow_pointer_cleared": {"depot", "type"},

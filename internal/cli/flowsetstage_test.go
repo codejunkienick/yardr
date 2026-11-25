@@ -133,13 +133,27 @@ func TestFlowSetStage(t *testing.T) {
 		t.Errorf("stderr = %q, want it to begin %q", errs, want)
 	}
 
-	// --json is the stage file alone.
+	// --json is the stage file as the Line carries it: its digest, and the text
+	// it replaced, which the yard keeps.
 	a.json = true
 	out, errs, err = set("Build it, thrice.\n", "code", "b", "-f", "-")
 	a.json = false
-	var got store.StageFile
-	if err != nil || errs != "" || json.Unmarshal([]byte(out), &got) != nil || got.Path != path || got.Text != "Build it, thrice.\n" {
-		t.Errorf("flow set-stage --json = %q, %q, %v: want the stage file alone", out, errs, err)
+	var got store.LineStageFile
+	want := store.LineStageFile{Path: path, Text: "Build it, thrice.\n", Digest: stageDigest("Build it, thrice.\n"), PriorDigest: stageDigest(next), PriorText: next}
+	if err != nil || errs != "" || json.Unmarshal([]byte(out), &got) != nil || got != want {
+		t.Errorf("flow set-stage --json = %q, %q, %v: want the stage file %+v", out, errs, err, want)
+	}
+	if kept, err := os.ReadFile(filepath.Join(filepath.Dir(path), "..", "..", "stage-history", stageDigest(next))); err != nil || string(kept) != next {
+		t.Errorf("the text it replaced is kept as %q, %v, want %q", kept, err, next)
+	}
+	// A broken ## Ask section is the same warning beside the result, as the
+	// answer's own field: the save is not refused for it.
+	a.json = true
+	out, errs, err = set(strings.Replace(broken, "Accept it?", "Accept it twice?", 1), "code", "qa/c", "-f", "-")
+	a.json = false
+	var warned store.LineStageFile
+	if err != nil || json.Unmarshal([]byte(out), &warned) != nil || warned.Warning == "" || errs != "warning: stage file "+warned.Warning+"\n" || warned.PriorText != broken {
+		t.Errorf("flow set-stage --json of a broken ## Ask section = %q, %q, %v: want the warning in both, and the text it replaced", out, errs, err)
 	}
 
 	// The operator's alone, once the yard has one.

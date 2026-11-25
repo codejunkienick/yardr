@@ -37,6 +37,13 @@ macOS), replaces only that text. With neither, whatever stands is replaced.
 With -f -, the text is stdin as it is, trailing newlines included, so that
 its digest is the file's.
 
+A save keeps the text it replaces: before the file is replaced, the yard puts
+that text in <home>/stage-history/<sha256>, a read-only file named by the
+SHA-256 of the text, and refuses the save where it cannot. Saving that file
+puts the text back: yardr flow set-stage <flow> <stage> -f
+<home>/stage-history/<sha256>. --json says the digest of the text saved and,
+for the text it replaced, prior_digest and prior_text.
+
 A flow in a depot's repository has its stage files there, to be changed on a
 branch and committed: ` + store.RepoFlowDir + `/<flow>/<stage>.md. Nothing is written for
 one, and the refusal names the path.`,
@@ -74,10 +81,8 @@ one, and the refusal names the path.`,
 				return err
 			}
 			// Beside the result, so --json stays the stage file.
-			if f, err := st.GetFlow(c.Context(), flow); err == nil {
-				if broken := sf.BrokenAsk(f, stage); broken != "" {
-					fmt.Fprintf(c.ErrOrStderr(), "warning: stage file %s\n", broken)
-				}
+			if sf.Warning != "" {
+				fmt.Fprintf(c.ErrOrStderr(), "warning: stage file %s\n", sf.Warning)
 			}
 			return a.out(c.OutOrStdout(), sf, func(w io.Writer) { fmt.Fprintf(w, "stage file %s/%s: %s\n", flow, stage, sf.Path) })
 		},

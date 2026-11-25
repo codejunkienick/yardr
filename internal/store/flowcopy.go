@@ -416,7 +416,7 @@ func (w *wtx) copyMarked(depot string) (replaced map[string]bool, retried bool) 
 	if w.stageWrote == nil {
 		return nil, false
 	}
-	rest, ok := strings.CutPrefix(*w.stageWrote, "copy-repo "+depot+":")
+	rest, ok := strings.CutPrefix(w.stageWrote.key, "copy-repo "+depot+":")
 	if !ok {
 		return nil, false
 	}
@@ -486,7 +486,7 @@ func (w *wtx) copyRepoFlows(ctx context.Context, repo *RepoFlows, actor string) 
 			StageFiles: len(it.files), Replaced: it.replaced, Back: it.back})
 	}
 	if w.stageWrote != nil {
-		*w.stageWrote = plan.marker()
+		w.stageWrote.key = plan.marker()
 	}
 	for _, it := range plan.items {
 		if err := it.writeFiles(); err != nil {

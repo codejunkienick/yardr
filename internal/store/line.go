@@ -70,10 +70,33 @@ type LineStage struct {
 }
 
 // LineStageFile is a stage's file where it has one: its path as flow show
-// names it, and its text whole.
+// names it, its text whole, and what a save of it goes by. It is also what
+// PutStageFile answers with, so a save and a read give footplate and the
+// terminal one shape.
 type LineStageFile struct {
 	Path string `json:"path"`
 	Text string `json:"text"`
+	// Digest is the SHA-256 of Text in lower case hex, as sha256sum prints it:
+	// what a save's expectDigest (yardr flow set-stage --digest) holds it to.
+	Digest string `json:"digest,omitempty"`
+	// PriorDigest and PriorText are the text the latest save of a store flow's
+	// stage file replaced, which the yard keeps (StageHistoryDir) so that the
+	// save can be undone by one more; absent where that save created the file,
+	// the kept text is gone, is not what its name says or is longer than a
+	// card carries (MaxRunFlow), and on a flow of a depot's repository.
+	PriorDigest string `json:"prior_digest,omitempty"`
+	PriorText   string `json:"prior_text,omitempty"`
+	// Warning says where the text breaks its ## Ask section, as BrokenAsk does:
+	// "<path>: <why>", absent where it does not. A save is never refused for
+	// it, since the operator may be part way through an edit.
+	Warning string `json:"warning,omitempty"`
+}
+
+// lineStageFile is a stage file as the Line carries it, with the digest it is
+// saved by and the warning of a ## Ask section it breaks under f, the flow it
+// belongs to.
+func lineStageFile(sf *StageFile, f *Flow, stage string) *LineStageFile {
+	return &LineStageFile{Path: sf.Path, Text: sf.Text, Digest: stageDigest([]byte(sf.Text)), Warning: sf.BrokenAsk(f, stage)}
 }
 
 // LineRoute is a stage's representative route, whole: the route a probe
@@ -326,10 +349,11 @@ func (s *Store) lineStage(ctx context.Context, d *Depot, rf DepotFlow, stage str
 			return LineStage{}, err
 		}
 		if sf != nil {
-			ls.StageFile = &LineStageFile{Path: sf.Path, Text: sf.Text}
+			ls.StageFile = lineStageFile(sf, f, stage)
+			ls.StageFile.PriorDigest, ls.StageFile.PriorText = s.stagePrior(f.Name, stage, ls.StageFile.Digest)
 		}
 	} else if sf := repo.StageFile(f.Name, stage); sf != nil {
-		ls.StageFile = &LineStageFile{Path: sf.Path, Text: sf.Text}
+		ls.StageFile = lineStageFile(sf, f, stage)
 	}
 	probe := Bead{Stage: stage, Type: or(rf.Type, "task"), Depot: &d.Name, Priority: DefaultPriority}
 	rep := MatchRoute(routes, probe, operator, byGroup)

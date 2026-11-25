@@ -264,10 +264,18 @@ func HomeStageFiles(home string, f *Flow) (have map[string]string, stray []strin
 // 64 hex digits only where that file does, so a file that moved since is
 // refused, naming both digests. A flow of a depot's repository has its stage
 // files there, to be changed on a branch and committed, and is refused with
-// the path to edit; so is a stage the flow does not have. The write is
-// recorded as flow_set with the stage beside the flow. From a pane the actor
-// is the pane's (paneAuthor), as PutFlow's is.
-func (s *Store) PutStageFile(ctx context.Context, flow, stage, text, expectDigest, actor string) (*StageFile, error) {
+// the path to edit; so is a stage the flow does not have. The text a write
+// replaces is kept first, in the home's stage history, so that the save can be
+// undone by one more (archiveStageFile); a save that cannot keep it is refused.
+// The write is recorded as flow_set with the stage beside the flow, and with
+// the digest of the text it wrote and of the text it replaced (digest and
+// prev_digest, no prose). From a pane the actor is the pane's (paneAuthor), as
+// PutFlow's is.
+//
+// The answer is the stage file as the Line carries it (LineStageFile): its
+// digest, the text it replaced, and where its ## Ask section is broken, which
+// refuses nothing, since the operator may be part way through an edit.
+func (s *Store) PutStageFile(ctx context.Context, flow, stage, text, expectDigest, actor string) (*LineStageFile, error) {
 	expect, err := stageExpect(expectDigest)
 	if err != nil {
 		return nil, err
@@ -285,7 +293,7 @@ func (s *Store) PutStageFile(ctx context.Context, flow, stage, text, expectDiges
 	if err != nil {
 		return nil, err
 	}
-	var out *StageFile
+	var out *LineStageFile
 	err = s.write(func(w *wtx) error {
 		w.repos = repos
 		resolved, err := paneAuthor(w.Tx, callerOf(ctx), actor)
@@ -306,16 +314,22 @@ func (s *Store) PutStageFile(ctx context.Context, flow, stage, text, expectDiges
 // runs: the operator's gate, the flow and its stage, what stands held to
 // expect, and the file put in its place.
 //
+// A file with text in it that the write replaces is kept first, in the home's
+// stage history (archiveStageFile), and one that stands as none (no file, or
+// one with nothing in it) leaves nothing to keep.
+//
 // A batch may run a write twice, and a file its first run wrote stays when
 // that run's transaction is rolled back. That retry (w.stageWrote) finds its
-// own write already on disk and skips the digest check and rewrite, recording
-// the event again; any other call still holds what stands to expect even when
-// the file already holds text.
-func (w *wtx) putStageFile(ctx context.Context, flow, stage, text, expect, actor string) (*StageFile, error) {
+// own write already on disk and skips the digest check, the keeping and the
+// rewrite, recording the event again with what its first run replaced, which
+// w.stageWrote holds; any other call still holds what stands to expect even
+// when the file already holds text.
+func (w *wtx) putStageFile(ctx context.Context, flow, stage, text, expect, actor string) (*LineStageFile, error) {
 	if err := w.may(ctx, actor, ActChangeFlow, Object{Kind: KindFlow, Name: flow}); err != nil {
 		return nil, err
 	}
-	if _, err := w.stageFlowOf(flow, stage); err != nil {
+	f, err := w.stageFlowOf(flow, stage)
+	if err != nil {
 		return nil, err
 	}
 	st, err := standStage(w.home, flow, stage)
@@ -323,24 +337,43 @@ func (w *wtx) putStageFile(ctx context.Context, flow, stage, text, expect, actor
 		return nil, err
 	}
 	key := "stage " + flow + " " + stage
-	same := st.digest == stageDigest([]byte(text))
-	if w.stageWrote == nil || *w.stageWrote != key || !same {
+	digest := stageDigest([]byte(text))
+	same := st.digest == digest
+	var prevDigest, prevText string
+	if w.stageWrote != nil && w.stageWrote.key == key && same {
+		prevDigest, prevText = w.stageWrote.prevDigest, w.stageWrote.prevText
+	} else {
 		if err := st.held(expect); err != nil {
 			return nil, err
 		}
 		if !same {
+			// Kept before it goes, and the write refused where it cannot be:
+			// a copy left by a write that then fails holds nothing that is not
+			// the file's own, named by its bytes.
+			if st.digest != stageNone {
+				if err := archiveStageFile(filepath.Dir(st.root), st.digest, []byte(st.text)); err != nil {
+					return nil, fmt.Errorf("stage file of %s in flow %s: keep the text it replaces: %w", stage, flow, err)
+				}
+				prevDigest, prevText = st.digest, st.text
+			}
 			if err := st.write(text); err != nil {
 				return nil, fmt.Errorf("stage file of %s in flow %s: %w", stage, flow, err)
 			}
 			if w.stageWrote != nil {
-				*w.stageWrote = key
+				*w.stageWrote = stageWriteState{key: key, prevDigest: prevDigest, prevText: prevText}
 			}
 		}
 	}
-	if err := w.event("", "flow_set", actor, map[string]any{"flow": flow, "stage": stage}); err != nil {
+	data := map[string]any{"flow": flow, "stage": stage, "digest": digest}
+	if prevDigest != "" {
+		data["prev_digest"] = prevDigest
+	}
+	if err := w.event("", "flow_set", actor, data); err != nil {
 		return nil, err
 	}
-	return &StageFile{Path: st.path, Text: text}, nil
+	out := lineStageFile(&StageFile{Path: st.path, Text: text}, f, stage)
+	out.PriorDigest, out.PriorText = prevDigest, prevText
+	return out, nil
 }
 
 // stageFlowOf is the store flow flow, which has the stage stage, for a write

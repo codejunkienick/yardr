@@ -134,6 +134,10 @@ func TestLineGitDepotRepoFlow(t *testing.T) {
 	}
 	if nw.StageFile == nil || nw.StageFile.Path != ".yardr/flows/default/new.md" || nw.StageFile.Text != "Build the bead.\n" {
 		t.Errorf("new stage file = %+v, want the repository file whole", nw.StageFile)
+	} else if sum := sha256.Sum256([]byte(nw.StageFile.Text)); nw.StageFile.Digest != hex.EncodeToString(sum[:]) || nw.StageFile.PriorDigest != "" || nw.StageFile.PriorText != "" || nw.StageFile.Warning != "" {
+		// A repository's file is changed on a branch: git keeps what it was,
+		// so it carries no prior text, and it has no ## Ask section to break.
+		t.Errorf("new stage file = %+v, want its digest alone", nw.StageFile)
 	}
 	if nw.Route == nil {
 		t.Fatalf("new has no representative route: %+v", nw)
@@ -241,6 +245,8 @@ func TestLineDirDepotDirectoryAndStoreFlows(t *testing.T) {
 	inbox := lineStage(t, line, "default", "inbox")
 	if inbox.StageFile == nil || inbox.StageFile.Text != "Take it in.\n" {
 		t.Errorf("inbox stage file = %+v, want the directory's", inbox.StageFile)
+	} else if sum := sha256.Sum256([]byte("Take it in.\n")); inbox.StageFile.Digest != hex.EncodeToString(sum[:]) {
+		t.Errorf("inbox stage file digest = %q, want that of its text", inbox.StageFile.Digest)
 	}
 	if inbox.Route == nil || len(inbox.Route.Chain) != 1 || inbox.Route.Chain[0].Prompt == nil {
 		t.Fatalf("inbox route = %+v, want workers with a prompt", inbox.Route)

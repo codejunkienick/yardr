@@ -635,6 +635,30 @@ yardr flow set-stage code review -f review.md
 yardr flow set-stage code qa/smoke -f smoke.md --digest none
 ```
 
+**The text a save replaces is kept.** Before the file is replaced, the yard
+puts the text that stands in `<home>/stage-history/<sha256>`: one read-only
+file for each text, named by the SHA-256 of its bytes (the digest `--digest`
+takes), in one flat directory beside `flows/`, whatever the stage's name (one
+that holds a slash has no directory there). A file that stood as none, with no
+file or nothing in it, leaves nothing to keep. A save that cannot keep the
+text it replaces is refused, with the stage file as it was: a symbolic link,
+a file that is no plain one or other text stands at the name its digest gives,
+or `stage-history` is a symbolic link or no directory. Nothing prunes the
+directory (`yardr store prune` sweeps `blobs/` alone), so a kept text stays
+until its file is removed. Saving a kept file puts its text back:
+
+```
+yardr flow set-stage code review -f <home>/stage-history/<sha256>
+```
+
+The `flow_set` event of a save holds no prose either: it names by digest the
+text it wrote (`digest`) and the one it replaced (`prev_digest`, absent where
+none was). `--json` answers with the stage file as the [`Line`](api.md#line)
+carries it: `path`, `text` and `digest`, and, for the text the save replaced,
+`prior_digest` and `prior_text`. A text whose `## Ask` section is broken is
+saved all the same, since refusing it would stop an edit part way through:
+the answer says so as `warning`, and the command prints it on stderr.
+
 A flow in a depot's repository has its stage files in the repository, so
 `flow set-stage` refuses it, naming the path to change there:
 `.yardr/flows/<flow>/<stage>.md` for a flow, and
@@ -655,12 +679,15 @@ proposed text breaks its `## Ask` section. It refuses at the ask a text past
 set in a terminal), a file that is not what `--digest` says, and a file that
 holds the text already. The approval is held to the file as the card saw it,
 so one that appeared, changed, was removed or was emptied since is refused
-with nothing written. For a flow a pack manages the card says so: it sets the
-yard's copy of the stage file and changes nothing of the pack, and `yardr pack
-apply` then keeps the yard's copy, whatever the pack moves, and sets the
-pack's only where it is told to (`--take file/<name>`, the name `yardr pack
-check <pack>` gives the file). Either way the write is recorded as `flow_set`,
-with the `stage` beside the `flow`.
+with nothing written. Shown whole or not, the text that stands is kept as a
+save keeps it, and the card's take-back names the file: `yardr flow set-stage
+<flow> <stage> -f <home>/stage-history/<sha256>`. For a flow a pack manages
+the card says so: it sets the yard's copy of the stage file and changes
+nothing of the pack, and `yardr pack apply` then keeps the yard's copy,
+whatever the pack moves, and sets the pack's only where it is told to
+(`--take file/<name>`, the name `yardr pack check <pack>` gives the file).
+Either way the write is recorded as `flow_set`, with the `stage` beside the
+`flow`, and the `digest` and `prev_digest` above.
 
 Where it shows:
 
