@@ -1950,15 +1950,17 @@ yardr knows the verbs alone:
   sandbox denies the network too: the pack's
   [README](../packs/contributors/README.md#the-pr-reviewers-group-binds-read-only)
   says what a maintainer then answers in the reviewer's pane.
-- **Nothing of the yard pushes, and it merges only what is `merge-ok`.**
-  The review is a note on the bead, and the yard posts it on the pull
-  request as a comment (`review-post`, above). A pull request marked `merge-ok` (by the reviewer, a bot's bump
-  of Go modules, or by a maintainer's yes, `yardr bead update <id>
-  --add-label merge-ok --meta merge_head=<sha>`) is merged from `approved`
-  by `contrib/assembly/merge-pr`, an `exec` group of the yard's own routed
+- **The yard posts the review, pushes only a picked fix, and merges only
+  what is `merge-ok`.** The review is a note on the bead, and the yard
+  posts it on the pull request as a comment (`review-post`, above). A pull
+  request marked `merge-ok` (by the reviewer, a bot's bump of Go modules,
+  or by a maintainer's yes, `yardr bead update <id> --add-label merge-ok
+  --meta merge_head=<sha>`) is merged from `approved` by
+  `contrib/assembly/merge-pr`, an `exec` group of the yard's own routed
   for the label ([line.md](line.md#merging-pull-requests)), and only where
   the yard's CI has passed on the head; any other waits there for a
-  maintainer to merge it on GitHub.
+  maintainer to merge it on GitHub. Its one push is the fix a maintainer
+  picked (`fix` and `push`, above).
 
 ## The design pack
 

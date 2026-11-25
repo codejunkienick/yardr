@@ -52,11 +52,18 @@ func shapeOf(have, want string, was []string) keptShape {
 
 // keptWords is the Keeps line of an object the import leaves as the yard has
 // it: what stays (what is the yard's version of it), why, and the flag that
-// takes the pack's version instead.
-func keptWords(s keptShape, what, take string) string {
+// takes the pack's version instead. kept says that a take keeps the yard's
+// change, as it does of a stage file, whose text goes to the stage history
+// before the pack's replaces it (store.KeepStageFile); a take of anything else
+// drops the yard's change, and the DIVERGED line says which it is.
+func keptWords(s keptShape, what, take string, kept bool) string {
 	switch s {
 	case keptDiverged:
-		return fmt.Sprintf("%s, DIVERGED: changed since the last import, and the pack's has changed too; --take %s takes the pack's and drops the yard's change", what, take)
+		change := "drops the yard's change"
+		if kept {
+			change = "keeps the yard's change in the stage history"
+		}
+		return fmt.Sprintf("%s, DIVERGED: changed since the last import, and the pack's has changed too; --take %s takes the pack's and %s", what, take, change)
 	case keptUnknown:
 		return fmt.Sprintf("%s: no import recorded what it wrote, so it cannot be told whose change it is; --take %s takes the pack's", what, take)
 	}
@@ -75,7 +82,7 @@ func (b *planner) keepFlow(have, want store.Flow) []string {
 	if shape == notKept {
 		return nil
 	}
-	return []string{keptWords(shape, "the yard's flow", "flow/"+want.Name)}
+	return []string{keptWords(shape, "the yard's flow", "flow/"+want.Name, false)}
 }
 
 // flowRecord is the record of a flow the plan carries: its name and the

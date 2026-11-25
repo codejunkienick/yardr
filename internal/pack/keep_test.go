@@ -138,7 +138,7 @@ func TestFlowTheYardChangedIsKeptUntilTaken(t *testing.T) {
 	movePack(t, dir)
 	moved := build(t, st, load(t, dir), o)
 	m := find(t, moved, "flow", "starter.default")
-	if m.Action != pack.Kept || len(m.Keeps) != 1 || !strings.Contains(m.Keeps[0], "DIVERGED") {
+	if m.Action != pack.Kept || len(m.Keeps) != 1 || !strings.Contains(m.Keeps[0], "DIVERGED") || !strings.Contains(m.Keeps[0], "drops the yard's change") || strings.Contains(m.Keeps[0], "stage history") {
 		t.Fatalf("flow after the pack moved too = %+v", m)
 	}
 	res := apply(t, st, moved, nil)
@@ -411,7 +411,9 @@ func TestHandEditedRoleIsKeptUntilTaken(t *testing.T) {
 		t.Fatal(err)
 	}
 	moved := build(t, st, load(t, dir), o)
-	if f := find(t, moved, "file", "roles/builder.md"); f.Action != pack.Kept || !strings.Contains(f.Keeps[0], "DIVERGED") {
+	// A role's take drops the yard's change, and the line says so; it is a stage
+	// file's take that keeps it.
+	if f := find(t, moved, "file", "roles/builder.md"); f.Action != pack.Kept || !strings.Contains(f.Keeps[0], "DIVERGED") || !strings.Contains(f.Keeps[0], "drops the yard's change") || strings.Contains(f.Keeps[0], "stage history") {
 		t.Fatalf("builder.md after the pack moved too = %+v", f)
 	}
 	if res := apply(t, st, moved, nil); len(res.Kept) != 1 || !res.Recorded {

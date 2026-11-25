@@ -14,21 +14,28 @@ import (
 // nothing, the yard's flow being what an import wrote means the pack moved,
 // and otherwise the yard changed it, and the pack moved too unless its version
 // is one an import recorded. Depots share the store's flow, so the records
-// are several, and any of them may be what the yard has.
+// are several, and any of them may be what the yard has. Only the DIVERGED
+// line says what a take does with the yard's change: it drops it, but keeps a
+// stage file's text in the stage history, and the other two lines say nothing
+// of either.
 func TestShapeOf(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		have, want string
 		was        []string
 		shape      keptShape
-		says       []string // what its line says, and the others must not
+		stage      bool     // a stage file, not a flow
+		says, not  []string // what its line says, and what it must not
 	}{
-		{"no record", "y", "p", nil, keptUnknown, []string{"no import recorded what it wrote"}},
-		{"the yard has what an import wrote", "w", "p", []string{"w"}, notKept, nil},
-		{"the yard has what another depot's import wrote", "w2", "p", []string{"w1", "w2"}, notKept, nil},
-		{"the yard changed it and the pack did not move", "y", "w", []string{"w"}, keptEdited, []string{"the pack's has not changed since"}},
-		{"the pack's version is another depot's record", "y", "w2", []string{"w1", "w2"}, keptEdited, []string{"the pack's has not changed since"}},
-		{"both changed", "y", "p", []string{"w"}, keptDiverged, []string{"DIVERGED", "drops the yard's change"}},
+		{"no record", "y", "p", nil, keptUnknown, false, []string{"no import recorded what it wrote"}, []string{"drops", "stage history"}},
+		{"the yard has what an import wrote", "w", "p", []string{"w"}, notKept, false, nil, nil},
+		{"the yard has what another depot's import wrote", "w2", "p", []string{"w1", "w2"}, notKept, false, nil, nil},
+		{"the yard changed it and the pack did not move", "y", "w", []string{"w"}, keptEdited, false, []string{"the pack's has not changed since"}, []string{"drops", "stage history"}},
+		{"the pack's version is another depot's record", "y", "w2", []string{"w1", "w2"}, keptEdited, false, []string{"the pack's has not changed since"}, []string{"drops", "stage history"}},
+		{"both changed", "y", "p", []string{"w"}, keptDiverged, false, []string{"DIVERGED", "drops the yard's change"}, []string{"stage history"}},
+		{"a stage file, no record", "y", "p", nil, keptUnknown, true, []string{"no import recorded what it wrote"}, []string{"drops", "stage history"}},
+		{"a stage file the yard changed and the pack did not move", "y", "w", []string{"w"}, keptEdited, true, []string{"the pack's has not changed since"}, []string{"drops", "stage history"}},
+		{"a stage file, both changed", "y", "p", []string{"w"}, keptDiverged, true, []string{"DIVERGED", "keeps the yard's change in the stage history"}, []string{"drops"}},
 	} {
 		got := shapeOf(tc.have, tc.want, tc.was)
 		if got != tc.shape {
@@ -38,13 +45,22 @@ func TestShapeOf(t *testing.T) {
 		if tc.shape == notKept {
 			continue
 		}
-		line := keptWords(got, "the yard's flow", "flow/p.f")
-		if !strings.Contains(line, "--take flow/p.f takes the pack's") || strings.Contains(line, "DIVERGED") != (tc.shape == keptDiverged) {
+		what, take := "the yard's flow", "flow/p.f"
+		if tc.stage {
+			what, take = "the yard's copy", "file/flows/f/new.md"
+		}
+		line := keptWords(got, what, take, tc.stage)
+		if !strings.Contains(line, "--take "+take+" takes the pack's") || strings.Contains(line, "DIVERGED") != (tc.shape == keptDiverged) {
 			t.Errorf("%s: line %q", tc.name, line)
 		}
 		for _, say := range tc.says {
 			if !strings.Contains(line, say) {
 				t.Errorf("%s: line %q lacks %q", tc.name, line, say)
+			}
+		}
+		for _, no := range tc.not {
+			if strings.Contains(line, no) {
+				t.Errorf("%s: line %q says %q", tc.name, line, no)
 			}
 		}
 	}

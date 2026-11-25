@@ -1355,6 +1355,20 @@ groups:
 	if got, held := stageHistory(t, o.Home), map[string]string{sumOf("edited\n"): "edited\n"}; !reflect.DeepEqual(got, held) {
 		t.Fatalf("the stage history after the take holds %v, want %v", got, held)
 	}
+
+	// The yard changes it again and the pack moves: the plan's line says the
+	// take keeps the yard's change in the stage history, as it does of a stage
+	// file by whatever name, which the plan's object says and the path cannot.
+	if err := os.WriteFile(to, []byte("edited again\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "flows", "default", "qa", "smoke.md"), []byte("smoke, moved\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f = find(t, build(t, st, load(t, dir), o), "file", "flows/default/qa/smoke.md")
+	if f.Action != pack.Kept || len(f.Keeps) != 1 || !strings.Contains(f.Keeps[0], "DIVERGED") || !strings.Contains(f.Keeps[0], "keeps the yard's change in the stage history") || strings.Contains(f.Keeps[0], "drops") {
+		t.Fatalf("the nested stage's file after the yard and the pack changed it = %+v, want it kept, DIVERGED, with its change kept in the stage history", f)
+	}
 }
 
 // A pack that names no stage file brings none: the plan has only its roles

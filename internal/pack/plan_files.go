@@ -103,10 +103,12 @@ func (b *planner) file(rel string, op *FileOp) error {
 	o := Object{Kind: "file", Name: rel, Action: action(exists, changes), Changes: changes, File: op, Edited: edited}
 	// A role or a stage file, the files an import fills, is a starting point:
 	// the yard's change to it stays, where a script or the frame, which the
-	// yard runs or serves as the pack has them, stops the import (Edited).
+	// yard runs or serves as the pack has them, stops the import (Edited). The
+	// line says what a take does with the yard's change: a stage file's text is
+	// kept in the stage history first (write, in apply.go), a role's is dropped.
 	if edited && op.Fill {
 		o.Action, o.Edited = Kept, false
-		o.Keeps = []string{keptWords(shapeOf(sum(have), op.SHA256, was), "the yard's copy", o.TakeName())}
+		o.Keeps = []string{keptWords(shapeOf(sum(have), op.SHA256, was), "the yard's copy", o.TakeName(), op.StageFile())}
 	}
 	b.add(o)
 	return nil
