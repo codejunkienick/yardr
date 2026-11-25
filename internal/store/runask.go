@@ -117,7 +117,8 @@ type AskRun struct {
 	// beside argv, in the ask's --run-test. No other row keeps it.
 	Test string `json:"test,omitempty"`
 	// Flow is the whole flow a flow set row carries beside argv, in the
-	// ask's --run-flow, as the line format writes it. No other row keeps it.
+	// ask's --run-flow, as the line format writes it, or the text of the
+	// stage file a flow set-stage row carries there. No other row keeps it.
 	Flow string `json:"flow,omitempty"`
 	// Role is the prompt text a crew add, group add, group set or crew set
 	// row carries beside argv (the ask's --run-role, or the file prompt=

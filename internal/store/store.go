@@ -499,6 +499,10 @@ type wtx struct {
 	// nil on every other write: a tell in the same write leaves it alone,
 	// since the write answers it rather than stales it (runask_stale.go).
 	approving *approvingAsk
+	// stageWrote outlives one transaction attempt of Store.write: bbolt.Batch
+	// may re-run fn after rolling back another tx in the batch, leaving the
+	// stage file written on the first attempt on disk (putStageFile).
+	stageWrote *string
 }
 
 // write runs fn in a batched write transaction, then nudges the pump to
@@ -508,8 +512,9 @@ func (s *Store) write(fn func(*wtx) error) error {
 	defer s.writing.Add(-1)
 	var settle, queued []string
 	var heldFiles []heldFileFetch
+	var stageWrote string
 	err := s.db.Batch(func(tx *bolt.Tx) error {
-		w := &wtx{Tx: tx, store: s, home: s.home, mentions: &s.mentions}
+		w := &wtx{Tx: tx, store: s, home: s.home, mentions: &s.mentions, stageWrote: &stageWrote}
 		err := fn(w)
 		settle, queued = w.settle, w.queued // of the run that is committed: a batch may run fn twice
 		heldFiles = w.heldFiles

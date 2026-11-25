@@ -149,6 +149,7 @@ type API interface {
 	DeleteRoute(ctx context.Context, id, actor string) error
 
 	PutFlow(ctx context.Context, f Flow, actor string) (*Flow, error)
+	PutStageFile(ctx context.Context, flow, stage, text, expectDigest, actor string) (*StageFile, error)
 	ListFlows(ctx context.Context) ([]Flow, error)
 	GetFlow(ctx context.Context, name string) (*Flow, error)
 	DeleteFlow(ctx context.Context, name, actor string) error

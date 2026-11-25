@@ -528,6 +528,56 @@ pointer finds only in the depot's repository is a repository flow.
 A stage whose name holds a slash has its file a directory deeper
 (`default/qa/smoke.md` for `qa/smoke`). An empty file counts as none.
 
+**Setting a store flow's stage file.** The files are yours to edit in the
+home, and `yardr flow set-stage <flow> <stage> -f <file>` does it for you:
+it creates or replaces `<home>/flows/<flow>/<stage>.md`, and is the
+operator's. The text is written whole, in one step, so that a reader sees
+the old file or the new, and at the mode of the file it replaces (a new one
+is `rw-r--r--`); `-f -` takes stdin as it is, trailing newlines too. A stage
+the flow does not have is refused, naming the stages it has, and so is text
+with nothing in it, since an empty file counts as none (a stage's file is
+taken away by removing it in a terminal). Nothing is written through a
+symbolic link: one in the flows directory, in the flow's own or at the file
+is refused.
+
+`--digest` holds the write to the file as you read it, so that a change made
+since is not written over. `--digest none` creates the file and is refused
+where one stands. `--digest <sha256>`, the digest `sha256sum <file>` prints
+on Linux and `shasum -a 256 <file>` on macOS, replaces only the file with
+that digest, and is refused where the file moved, naming both. With neither,
+whatever stands is replaced. A file that already holds exactly the text is
+left as it is.
+
+```
+yardr flow set-stage code review -f review.md
+yardr flow set-stage code qa/smoke -f smoke.md --digest none
+```
+
+A flow in a depot's repository has its stage files in the repository, so
+`flow set-stage` refuses it, naming the path to change there:
+`.yardr/flows/<flow>/<stage>.md` for a flow, and
+`.yardr/flows/type/<type>/<stage>.md` for a type's, edited on a branch and
+committed. Nothing here writes a branch or a commit.
+
+A crew member or a user proposes the same change as a card, which the
+operator approves: `yardr bead ask <id> - --run-flow <file>`, with the command
+on an `R:` line of stdin (`R: flow set-stage <flow> <stage>
+[--digest <sha256|none>]`). The text goes beside the command, from the file as
+it is when the ask is made, and never as `F:` lines, which trim and drop the
+blank lines a stage file has. The card is weighty `code`, always: it shows the
+text that stands and the text proposed, each whole, and a warning where the
+proposed text breaks its `## Ask` section. It refuses at the ask a text past
+32 KiB or with a control character other than a tab or a newline (those are
+set in a terminal), a file that is not what `--digest` says, and a file that
+holds the text already. The approval is held to the file as the card saw it,
+so one that appeared, changed, was removed or was emptied since is refused
+with nothing written. For a flow a pack manages the card says so: it sets the
+yard's copy of the stage file and changes nothing of the pack, and `yardr pack
+apply` then keeps the yard's copy, whatever the pack moves, and sets the
+pack's only where it is told to (`--take file/<name>`, the name `yardr pack
+check <pack>` gives the file). Either way the write is recorded as `flow_set`,
+with the `stage` beside the `flow`.
+
 Where it shows:
 
 - **The brief.** Under `## Stage <stage>`, after the role prompt and the

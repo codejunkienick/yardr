@@ -105,7 +105,45 @@ func askRunCarried(command string, words []string, test string, testSet bool, ro
 			return nil, err
 		}
 	}
+	// Flow set-stage carries a stage file's text the same way, from the
+	// file alone: F: lines are trimmed and lose their blank lines, which
+	// a stage file's text does not.
+	if flowSetStageCommand(command) {
+		if run.Flow, err = flowSetStageCarried(flow, flowSet); err != nil {
+			return nil, err
+		}
+	}
 	return run, nil
+}
+
+// flowSetStageCommand reports whether command is the run ask flow set-stage
+// <flow> <stage> ...: those words, with or without the leading yardr. The
+// store parses it; this only says the ask may carry a stage file's text
+// beside it.
+func flowSetStageCommand(command string) bool {
+	words := strings.Fields(command)
+	if len(words) > 0 && words[0] == "yardr" {
+		words = words[1:]
+	}
+	return len(words) >= 4 && words[0] == "flow" && words[1] == "set-stage"
+}
+
+// flowSetStageCarried reads what a run ask of flow set-stage carries: the
+// file --run-flow names, read once, so the store holds the bytes the card
+// shows. One longer than a card shows is refused here, naming the terminal
+// command that sets it.
+func flowSetStageCarried(file string, fileSet bool) (string, error) {
+	if !fileSet {
+		return "", fmt.Errorf("the run ask flow set-stage <flow> <stage> carries its text beside the ask, in --run-flow <file>")
+	}
+	data, err := readCardText(file, store.MaxRunFlow, "stage file")
+	if err != nil {
+		return "", err
+	}
+	if len(data) > store.MaxRunFlow {
+		return "", fmt.Errorf("%s exceeds %d bytes: a run ask carries at most that, so set it with yardr flow set-stage in a terminal", store.OneLine(file), store.MaxRunFlow)
+	}
+	return string(data), nil
 }
 
 // flowSetCommand reports whether command is the run ask flow set
@@ -350,6 +388,15 @@ func crewPromptFile(command string) string {
 }
 
 func readCrewRoleFile(file string) ([]byte, error) {
+	return readCardText(file, store.MaxRunCrewRole, "role")
+}
+
+// readCardText reads the file a card carries as text, named what in its
+// refusals: a regular file, opened without blocking so that a pipe cannot
+// hold the ask, and no more than limit bytes and one more, so that the
+// caller can tell a file that fits from one that does not. What fits is
+// held to be UTF-8, which a card shows whole.
+func readCardText(file string, limit int, what string) ([]byte, error) {
 	f, err := os.OpenFile(file, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %s", store.OneLine(file), store.OneLine(err.Error()))
@@ -360,14 +407,14 @@ func readCrewRoleFile(file string) ([]byte, error) {
 		return nil, fmt.Errorf("%s: %s", store.OneLine(file), store.OneLine(err.Error()))
 	}
 	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("%s: the role is not a regular file", store.OneLine(file))
+		return nil, fmt.Errorf("%s: the %s is not a regular file", store.OneLine(file), what)
 	}
-	data, err := io.ReadAll(io.LimitReader(f, int64(store.MaxRunCrewRole)+1))
+	data, err := io.ReadAll(io.LimitReader(f, int64(limit)+1))
 	if err != nil {
 		return nil, fmt.Errorf("%s: %s", store.OneLine(file), store.OneLine(err.Error()))
 	}
-	if len(data) <= store.MaxRunCrewRole && !utf8.Valid(data) {
-		return nil, fmt.Errorf("the role in %s is not valid UTF-8 text: a card carries text only", store.OneLine(file))
+	if len(data) <= limit && !utf8.Valid(data) {
+		return nil, fmt.Errorf("the %s in %s is not valid UTF-8 text: a card carries text only", what, store.OneLine(file))
 	}
 	return data, nil
 }

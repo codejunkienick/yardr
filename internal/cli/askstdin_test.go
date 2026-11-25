@@ -183,6 +183,21 @@ func testBeadAskStdin(t *testing.T) {
 		t.Fatalf("the flow set file ask carries %+v, %v", flowAskRun, err)
 	}
 
+	// A file is no prose, so --run-flow goes beside an ask on stdin as --run-role
+	// does; F: lines are the other way to carry a flow, and the two are refused
+	// together.
+	if _, err := ask("Q: Set the flow from a file?\nC: the line changes\nR: flow set code\n", id, "-", "--run-flow", flowPath); err != nil {
+		t.Fatalf("a flow set ask on stdin beside --run-flow: %v", err)
+	}
+	got = notes()
+	if flowAskRun, err = askedRun(ctx, st, id, got[len(got)-1].Seq); err != nil || flowAskRun.Flow != flowText {
+		t.Fatalf("the flow set ask on stdin beside --run-flow carries %+v, %v", flowAskRun, err)
+	}
+	if _, err := ask("Q: Set the flow?\nC: the line changes\nR: flow set code\nF: in -> done\n", id, "-", "--run-flow", flowPath); err == nil ||
+		!strings.Contains(err.Error(), "--run-flow reads a flow file and --run-flow-line gives its lines: one of the two") {
+		t.Errorf("a file and F: lines = %v", err)
+	}
+
 	// Flags that name no prose go beside it, as ever.
 	if out, err := ask("Go?\nwhy.\n", id, "-", "--to", "ada"); err != nil || !strings.Contains(out, "to ada") {
 		t.Fatalf("an ask to ada on stdin: %v\n%s", err, out)

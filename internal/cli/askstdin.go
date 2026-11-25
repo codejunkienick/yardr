@@ -152,7 +152,7 @@ func askFromStdin(c *cobra.Command, args []string) error {
 	if len(args) == 0 || args[len(args)-1] != "-" || c.Flags().Changed("take-back") {
 		return nil
 	}
-	for _, name := range []string{"context", "option", "why", "run", "run-word", "run-test", "run-says", "run-makes", "run-flow", "run-flow-line"} {
+	for _, name := range []string{"context", "option", "why", "run", "run-word", "run-test", "run-says", "run-makes", "run-flow-line"} {
 		if c.Flags().Changed(name) {
 			return fmt.Errorf("with -, put every text on stdin: --%s is given beside it (%s)", name, askLabels)
 		}

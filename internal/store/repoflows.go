@@ -253,6 +253,162 @@ func HomeStageFiles(home string, f *Flow) (have map[string]string, stray []strin
 	return have, stray, err
 }
 
+// PutStageFile creates or replaces the stage file of stage in the store flow
+// flow, at <home>/flows/<flow>/<stage>.md where HomeStageFile reads it: the
+// text whole, put in by rename so that a reader sees the old file or the new.
+// What a stage file says is what whoever works a bead in the stage is shown,
+// so it is the operator's to set (ActChangeFlow), as the flow's stages are.
+//
+// expectDigest holds the write to the file as it was read: "" writes over
+// whatever stands, "none" only where none does, and the SHA-256 of the file in
+// 64 hex digits only where that file does, so a file that moved since is
+// refused, naming both digests. A flow of a depot's repository has its stage
+// files there, to be changed on a branch and committed, and is refused with
+// the path to edit; so is a stage the flow does not have. The write is
+// recorded as flow_set with the stage beside the flow. From a pane the actor
+// is the pane's (paneAuthor), as PutFlow's is.
+func (s *Store) PutStageFile(ctx context.Context, flow, stage, text, expectDigest, actor string) (*StageFile, error) {
+	expect, err := stageExpect(expectDigest)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := stageRel(stage); err != nil {
+		return nil, err
+	}
+	if s.home == "" {
+		return nil, errNoStageHome
+	}
+	if err := stageText(text); err != nil {
+		return nil, err
+	}
+	repos, err := s.stageRepos(ctx, flow)
+	if err != nil {
+		return nil, err
+	}
+	var out *StageFile
+	err = s.write(func(w *wtx) error {
+		w.repos = repos
+		resolved, err := paneAuthor(w.Tx, callerOf(ctx), actor)
+		if err != nil {
+			return err
+		}
+		out, err = w.putStageFile(ctx, flow, stage, text, expect, resolved)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// putStageFile is PutStageFile inside the write, as actor, whom the caller's
+// pane has been resolved to, and what the approval of a flow set-stage card
+// runs: the operator's gate, the flow and its stage, what stands held to
+// expect, and the file put in its place.
+//
+// A batch may run a write twice, and a file its first run wrote stays when
+// that run's transaction is rolled back. That retry (w.stageWrote) finds its
+// own write already on disk and skips the digest check and rewrite, recording
+// the event again; any other call still holds what stands to expect even when
+// the file already holds text.
+func (w *wtx) putStageFile(ctx context.Context, flow, stage, text, expect, actor string) (*StageFile, error) {
+	if err := w.may(ctx, actor, ActChangeFlow, Object{Kind: KindFlow, Name: flow}); err != nil {
+		return nil, err
+	}
+	if _, err := w.stageFlowOf(flow, stage); err != nil {
+		return nil, err
+	}
+	st, err := standStage(w.home, flow, stage)
+	if err != nil {
+		return nil, err
+	}
+	key := "stage " + flow + " " + stage
+	same := st.digest == stageDigest([]byte(text))
+	if w.stageWrote == nil || *w.stageWrote != key || !same {
+		if err := st.held(expect); err != nil {
+			return nil, err
+		}
+		if !same {
+			if err := st.write(text); err != nil {
+				return nil, fmt.Errorf("stage file of %s in flow %s: %w", stage, flow, err)
+			}
+			if w.stageWrote != nil {
+				*w.stageWrote = key
+			}
+		}
+	}
+	if err := w.event("", "flow_set", actor, map[string]any{"flow": flow, "stage": stage}); err != nil {
+		return nil, err
+	}
+	return &StageFile{Path: st.path, Text: text}, nil
+}
+
+// stageFlowOf is the store flow flow, which has the stage stage, for a write
+// of that stage's file; or why the file is not the store's to write: a flow
+// of a depot's repository has its stage files in the repository (w.repos, read
+// before the write by stageRepos), and a flow of no kind or a stage it lacks
+// has none to write. A flow named type/<type> is a repository's whatever any
+// depot says, since a store flow's name has no slash, so it is checked first.
+func (w *wtx) stageFlowOf(flow, stage string) (*Flow, error) {
+	switch {
+	case strings.HasPrefix(flow, "type/"):
+		return nil, repoStageRefusal(flow, stage)
+	case !validFlowName.MatchString(flow):
+		return nil, fmt.Errorf("flow name %q: use letters, digits, '.', '_' or '-'", flow)
+	}
+	f := new(Flow)
+	if ok, err := get(w.Tx, bFlows, flow, f); err != nil {
+		return nil, err
+	} else if !ok {
+		for _, repo := range w.repos {
+			if repo != nil && repo.find(flow, "") != nil {
+				return nil, repoStageRefusal(flow, stage)
+			}
+		}
+		return nil, fmt.Errorf("flow %s: %w", flow, ErrNotFound)
+	}
+	if !slices.Contains(f.Stages, stage) {
+		return nil, fmt.Errorf("flow %s has no stage %s; stages: %s", flow, stage, strings.Join(f.Stages, ", "))
+	}
+	return f, nil
+}
+
+// repoStageRefusal is the refusal of a stage file of a flow that is a depot's
+// repository's: the yard writes no file there, since a change to a flow's
+// files is read from the base once it has been reviewed and landed.
+func repoStageRefusal(flow, stage string) error {
+	return fmt.Errorf("flow %s is a flow of a depot's repository, not of the store: its stage files are in that repository, so edit %s on the depot's branch and commit it there by hand", flow, StageFilePath(flow, stage))
+}
+
+// stageRepos reads before the write what the depots' repositories say of
+// flow, when it may be one of theirs: git does not run inside a write, and
+// stageFlowOf names a repository's flow as one from what is read here. A flow
+// of the store, a flow named type/<type> (a repository's whatever they say)
+// and a name no flow has need none. A depot whose repository does not read is
+// left out, so that one broken checkout does not turn "that is a repository
+// flow" into "there is no such flow".
+func (s *Store) stageRepos(ctx context.Context, flow string) (map[string]*RepoFlows, error) {
+	if strings.HasPrefix(flow, "type/") || !validFlowName.MatchString(flow) {
+		return nil, nil
+	}
+	if _, err := s.GetFlow(ctx, flow); err == nil {
+		return nil, nil
+	} else if !errors.Is(err, ErrNotFound) {
+		return nil, err
+	}
+	depots, err := s.Depots(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]*RepoFlows{}
+	for _, d := range depots {
+		if repo, err := s.RepoFlows(ctx, d.Name); err == nil {
+			out[d.Name] = repo
+		}
+	}
+	return out, nil
+}
+
 // repoCache keeps each depot checkout's flows by base commit, so resolving a
 // flow costs one rev-parse until the base moves, and each dir depot's by its
 // files' mtimes and sizes, so it costs a listing until a file changes. The

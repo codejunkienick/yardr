@@ -74,10 +74,10 @@ field continues on the next:
 A line with no label among labeled ones, a label among unlabeled ones, an
 unknown label and a label with no words are refused, and nothing is asked.
 With - no text is a flag: --context, --option, --why, --run, --run-word,
---run-test, --run-says, --run-makes, --run-flow and --run-flow-line are refused beside it, and so is --new's -b -,
+--run-test, --run-says, --run-makes and --run-flow-line are refused beside it, and so is --new's -b -,
 which would read the same stdin. The flags that name no prose (--to,
 --recommend, --about, --setup,
---crew and the rest) go beside it. The secret flags name a source, a user, a
+--crew, the files --run-flow and --run-role name and the rest) go beside it. The secret flags name a source, a user, a
 crew member or a login, and never read stdin: the value is typed unseen
 where it is given (yardr bead answer <id> <ask> --secret), so that no
 history keeps it.
@@ -284,7 +284,8 @@ command takes or in the peer-add invite (the parts of tell=, the kinds peer
 allow carries, the grants crew set gives). A depot's test command, and a depot add's where it names one, go beside --run, in --run-test <command> or T: <command>, since they need those
 characters, and a hook add's says and makes lines go beside it in --run-says <line> and --run-makes <line>
 (S: and M:), each repeatable in order, since a line needs spaces, -> and free-text notes. A flow set's flow goes beside
-it from the file --run-flow <file> names, read once, or as F: lines in order, since a flow line needs the same. It checks the
+it from the file --run-flow <file> names, read once, or as F: lines in order, since a flow line needs the same;
+a flow set-stage's stage file text goes beside it from --run-flow <file> alone, since F: trims lines and drops blank ones. It checks the
 command against the yard as it stands, and refuses one the yard would
 refuse and one that would change nothing (a peer, source, group, crew
 member, user, setting, timer or bead the yard has not, a number out of
@@ -637,8 +638,8 @@ what the person asked does, and this is the asker's own.`,
 				return fmt.Errorf("--run-word gives a general card's words whole: --run-test, --run-role, --run-says, --run-makes and --run-flow go beside --run, not beside it")
 			case c.Flags().Changed("run-flow") && c.Flags().Changed("run-flow-line"):
 				return fmt.Errorf("--run-flow reads a flow file and --run-flow-line gives its lines: one of the two")
-			case c.Flags().Changed("run-flow") && (!c.Flags().Changed("run") || !flowSetCommand(askRun)):
-				return fmt.Errorf("--run-flow is the flow the run ask flow set <name> proposes: it goes with that command")
+			case c.Flags().Changed("run-flow") && (!c.Flags().Changed("run") || !flowSetCommand(askRun) && !flowSetStageCommand(askRun)):
+				return fmt.Errorf("--run-flow is the flow the run ask flow set <name> proposes, or the stage file text flow set-stage <flow> <stage> proposes: it goes with one of those commands")
 			case c.Flags().Changed("run-flow-line") && (!c.Flags().Changed("run") || !flowSetCommand(askRun)):
 				return fmt.Errorf("--run-flow-line is a line of the flow the run ask flow set <name> proposes: it goes with that command")
 			case c.Flags().Changed("run-test") && (!c.Flags().Changed("run") || !depotTestCommand(askRun) && !depotAddCommand(askRun)):
@@ -915,7 +916,7 @@ what the person asked does, and this is the asker's own.`,
 	ask.Flags().StringVar(&askRunRole, "run-role", "", "with --run crew add <name> ... (R:): the file whose role text the ask carries beside the command, shown whole on the card")
 	ask.Flags().StringArrayVar(&askRunSays, "run-says", nil, "with --run hook add <name> ... (R:): a says line the ask proposes (S:), repeatable in order, carried beside the command since a line needs spaces, -> and notes")
 	ask.Flags().StringArrayVar(&askRunMakes, "run-makes", nil, "with --run hook add <name> ... (R:): a makes line the ask proposes (M:), repeatable in order, carried beside the command since a line needs spaces and ->")
-	ask.Flags().StringVar(&askRunFlow, "run-flow", "", "with --run flow set <name> (R:): the file whose flow text the ask carries beside the command, shown whole on the card")
+	ask.Flags().StringVar(&askRunFlow, "run-flow", "", "with --run flow set <name> or flow set-stage <flow> <stage> (R:): the file whose flow or stage file text the ask carries beside the command, shown whole on the card")
 	ask.Flags().StringArrayVar(&askRunFlowLines, "run-flow-line", nil, "with --run flow set <name> (R:): one line of the flow the ask carries (F: on stdin), repeatable in order, instead of --run-flow <file>")
 	ask.Flags().StringVar(&askSetup, "setup", "", "set up this pack of kind source (one yardr embeds, or one the operator applied from a directory and left as it was) as one decision: the apply, the account and the grants, with --crew/--group naming who the grants are for")
 	ask.Flags().StringVar(&askDepotPush, "depot-push", "", "turn this depot's push to its origin on as one decision for the operator to approve: YARDR_PUSH=origin in <depot>-assembly's cmd and the pack's helper in the depot's git config, carried out by the server")

@@ -885,7 +885,8 @@ func TestRunListIsTheCLIs(t *testing.T) {
 		"yardr depot test <depot>":         {"depot test web"},
 		"yardr depot add <name> --clone <url> [--kind git] [--base <branch>]": {"depot add shed --clone file:///repos/shed.git"},
 		"yardr flow set <name>": {"flow set code"},
-		"yardr call <source> <call> [param=value ...] [--as <user>]": {"call crm note text=a test note"},
+		"yardr flow set-stage <flow> <stage> [--digest <sha256|none>]": {"flow set-stage code review"},
+		"yardr call <source> <call> [param=value ...] [--as <user>]":   {"call crm note text=a test note"},
 		"yardr hook rm <name>":                                     {"hook rm linear"},
 		"yardr source move <from> <to>":                            {"source move crm linear"},
 		"yardr user device pair <user> <device> [--url <address>]": {"user device pair ada tablet --url https://mac.example.net"},
@@ -899,7 +900,7 @@ func TestRunListIsTheCLIs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"--run-flow", "F: a line of a flow set's flow", "flow set <name>"} {
+	for _, want := range []string{"--run-flow", "F: a line of a flow set's flow", "flow set <name>", "flow set-stage <flow> <stage>"} {
 		if !strings.Contains(askHelp.Long, want) {
 			t.Errorf("yardr bead ask --help does not name %q", want)
 		}
@@ -1295,6 +1296,65 @@ func TestRunListIsTheCLIs(t *testing.T) {
 				}
 				if d.Test != "go test ./... && go vet ./..." || d.Base != "origin/main" || d.Path != "/srv/web" {
 					t.Fatalf("%s: the depot holds %+v", use, d)
+				}
+				continue
+			}
+			if use == "yardr flow set-stage <flow> <stage> [--digest <sha256|none>]" {
+				ctx := context.Background()
+				// A stage file card carries its text beside the command, and
+				// its terminal twin reads it from a file, so there is no typed
+				// Argv to compare word for word: the row is held to the help
+				// its card shows, its approval, and the file the approval left,
+				// which the terminal command leaves as it does.
+				const text = "Review it.\n\nSay what is wrong.\n"
+				file := filepath.Join(t.TempDir(), "review.md")
+				if err := os.WriteFile(file, []byte(text), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				f, err := store.ParseFlow("in -> review\nreview -> done\ndone terminal\n")
+				if err != nil {
+					t.Fatal(err)
+				}
+				f.Name = "code"
+				for _, y := range []*cliYard{approved, typed} {
+					if _, err := y.st.PutFlow(ctx, *f, "jo"); err != nil {
+						t.Fatal(err)
+					}
+				}
+				seq, err := approved.st.AddAsk(ctx, ab.ID, store.Ask{Question: "Run it?", To: "jo", Context: []string{"why"},
+					Run: &store.AskRun{Argv: []string{command}, Flow: text}}, "yardmaster")
+				if err != nil {
+					t.Fatalf("%s: %v", use, err)
+				}
+				notes, err := approved.st.Notes(ctx, ab.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var description string
+				for _, asked := range store.ResolveAsks(notes, time.Now()) {
+					if asked.Note.Seq == seq && asked.Ask.Run != nil {
+						description = asked.Ask.Run.Description
+					}
+				}
+				twin, _, err := (&app{}).flowCmd().Find([]string{"set-stage"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if description != twin.Short {
+					t.Errorf("%s card description %q, want the terminal command's %q", use, description, twin.Short)
+				}
+				done, err := approved.st.ApproveAsk(ctx, ab.ID, seq, "jo", true, nil)
+				if err != nil || !strings.HasPrefix(done.Result, "stage file code/review: ") {
+					t.Fatalf("%s approval = %+v, %v", use, done, err)
+				}
+				out, err := run(t, typed.a.flowCmd(), "set-stage", "code", "review", "-f", file)
+				if err != nil {
+					t.Fatalf("%s at a terminal: %v", use, err)
+				}
+				for who, path := range map[string]string{"the approval": strings.TrimPrefix(done.Result, "stage file code/review: "), "the terminal": stagePathIn(t, out, "code/review")} {
+					if got, err := os.ReadFile(path); err != nil || string(got) != text {
+						t.Errorf("%s left %q, %v; want %q", who, got, err, text)
+					}
 				}
 				continue
 			}

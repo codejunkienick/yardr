@@ -101,6 +101,10 @@ func TestSocketRefusesABeadsPaneWhatIsNotAnAgents(t *testing.T) {
 				Transitions: map[string][]string{"new": {"approved"}}, Terminal: []string{"approved"}}, "jo")
 			return err
 		}},
+		{"PutStageFile", func() error {
+			_, err := c.PutStageFile(ctx, "trains", "open", "Skip the review.\n", "", "jo")
+			return err
+		}},
 		{"SetFlowPointer", func() error { return c.SetFlowPointer(ctx, "", "", "trains", "jo") }},
 		{"Backup", func() error {
 			_, err := c.Backup(ctx, filepath.Join(backups, "yard.db"))
@@ -155,6 +159,9 @@ func TestSocketRefusesABeadsPaneWhatIsNotAnAgents(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(backups, "yard.db")); !os.IsNotExist(err) {
 		t.Errorf("the refused backup wrote a file: %v", err)
 	}
+	if _, err := os.Stat(filepath.Join(home, "flows")); !os.IsNotExist(err) {
+		t.Errorf("the refused PutStageFile wrote under the flows directory: %v", err)
+	}
 
 	// The work itself is served.
 	must(c.AddNote(ctx, b.ID, "a note from the agent", "jo"))
@@ -169,7 +176,7 @@ func TestSocketRefusesABeadsPaneWhatIsNotAnAgents(t *testing.T) {
 // A crew member's pane keeps what the yardmaster does today: it changes
 // groups and flows. The operator's and the daemon's calls stay theirs.
 func TestSocketServesACrewPaneTheYardsRouting(t *testing.T) {
-	st, c, _ := paneYard(t)
+	st, c, home := paneYard(t)
 	ctx := context.Background()
 	must := func(err error) {
 		t.Helper()
@@ -196,6 +203,19 @@ func TestSocketServesACrewPaneTheYardsRouting(t *testing.T) {
 	}
 	if _, err := st.GetFlow(ctx, "trains"); err != nil {
 		t.Errorf("the crew pane's flow: %v", err)
+	}
+	// What a stage says is the operator's, a crew member's own flow
+	// included: its call is served, and the store holds the write to the
+	// operator, whom the pane's name cannot be.
+	if _, err := c.PutStageFile(ctx, "trains", "open", "Skip the review.\n", "", "jo"); err == nil ||
+		!strings.Contains(err.Error(), "only the operator (jo) may change a flow's stages; this is yardmaster") {
+		t.Errorf("PutStageFile from a crew pane = %v, want it the operator's alone", err)
+	}
+	if sf, err := store.HomeStageFile(home, "trains", "open"); err != nil || sf != nil {
+		t.Errorf("the refused PutStageFile left the stage file %+v, %v", sf, err)
+	}
+	if _, err := st.PutStageFile(ctx, "trains", "open", "Work it.\n", "none", "jo"); err != nil {
+		t.Errorf("the operator's own PutStageFile: %v", err)
 	}
 	if err := c.DeletePeer(ctx, "far", "jo"); err == nil || !strings.HasPrefix(err.Error(), "DeletePeer is the operator's alone") {
 		t.Errorf("DeletePeer from a crew pane = %v, want it the operator's alone", err)

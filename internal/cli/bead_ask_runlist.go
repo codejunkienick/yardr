@@ -283,4 +283,18 @@ const askRunList = `  peer add <name> <invite>
       naming the beads it would strand is refused at the ask and again
       at approval; the yardmaster files it from the operator's own mail
       only
+  flow set-stage <flow> <stage> [--digest <sha256|none>]
+      a store flow's stage file, <home>/flows/<flow>/<stage>.md, created
+      or replaced with the text the file --run-flow names carries beside
+      the command (not F: lines): the card shows the text that stands and
+      the text proposed, each whole, and a warning where its ## Ask
+      section is broken; approving writes exactly that text, whole, at the
+      mode of the file it replaces, and only where the file is as the card
+      saw it (--digest names the file's SHA-256, or none where none
+      stands, and a file that moved since is refused at the ask and again
+      at approval); a flow a pack manages is carried the same way, its
+      card saying that yardr pack apply then keeps the yard's copy and
+      sets the pack's only with --take file/<name>; a flow of a depot's
+      repository is refused, naming the file to change on its branch
+      (weighty, code)
 `

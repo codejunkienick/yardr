@@ -314,7 +314,12 @@ func flowDiffLines(have, want Flow) []string {
 func (w *wtx) flowSetStale(seq uint64, was, now AskRun) error {
 	name := was.Argv[2]
 	if key := "flow " + name; was.Seen[key] != now.Seen[key] {
-		e := lastEvent(w.Tx, "flow_set", naming("flow", name))
+		// A stage file's write is a flow_set too (PutStageFile), with its
+		// stage beside the flow; it moved no stage of the flow.
+		e := lastEvent(w.Tx, "flow_set", func(e Event) bool {
+			_, stageFile := e.Data["stage"]
+			return naming("flow", name)(e) && !stageFile
+		})
 		return fmt.Errorf("ask %d was written when the flow %s was another: it was set since%s. %s", seq, name, since(e), nothingRan)
 	}
 	return staleCard(seq, was, now)
