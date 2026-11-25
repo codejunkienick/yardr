@@ -584,17 +584,17 @@ func subscriptionMatrix(crew []store.CrewMember, users []store.User, groups []st
 		col := subColumn{Name: r.Name, Kind: "crew"}
 		m.Subscribers = append(m.Subscribers, col)
 		for _, k := range r.On {
-			mark(onSubscription(k), col.String(), markOn, r.Name)
+			mark(onSubscription(k), col.String(), markOn, store.OnInbox(r.Name, k))
 		}
 		for _, sub := range r.Subscriptions {
-			mark(sub, col.String(), markSub, r.Name)
+			mark(sub, col.String(), markSub, store.SubInbox(r.Name, sub))
 		}
 	}
 	for _, u := range users {
 		col := subColumn{Name: u.Name, Kind: "user"}
 		m.Subscribers = append(m.Subscribers, col)
 		for _, sub := range u.Subscriptions {
-			mark(sub, col.String(), markSub, u.Name)
+			mark(sub, col.String(), markSub, store.SubInbox(u.Name, sub))
 		}
 	}
 	for _, g := range groups {
@@ -613,7 +613,7 @@ func subscriptionMatrix(crew []store.CrewMember, users []store.User, groups []st
 		for _, sub := range g.Subscriptions {
 			mark(sub, col.String(), markSub, "")
 			for _, member := range col.Reaches {
-				mark(sub, member, "via "+g.Name, member)
+				mark(sub, member, "via "+g.Name, store.SubInbox(member, sub))
 			}
 		}
 	}

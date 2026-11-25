@@ -47,8 +47,8 @@ func (e Entry) Clock() string { return clock(e.At) }
 // many: they are left out. So are a crew member's turns beginning and ending
 // (crew_status, but for one that stops at a prompt or leaves it), its
 // session sitting down at a login screen or leaving it (crew_login: the
-// nudge_held that tells whoever must log it in is news) and mail being read
-// (mail_read), which a view of the crew follows and nobody reads as news.
+// nudge_held that tells whoever must log it in is news), and receipts for
+// mail or the inbox.
 // Of a timer only its firing is news: not that it was set, dropped or
 // removed, nor the mail a firing is to a user, which the timer's own entry
 // tells.
@@ -56,7 +56,7 @@ func inFeed(e store.Event) bool {
 	// EventKind: an event from before the crew had the name is in the log
 	// under its old kind.
 	switch store.EventKind(e.Kind) {
-	case store.NoteJournal, store.NoteHandoff, "mail_read", "timer_set", "timer_dropped", "timer_removed":
+	case store.NoteJournal, store.NoteHandoff, "mail_read", "inbox_read", "inbox_shown", "timer_set", "timer_dropped", "timer_removed":
 		return false
 	case "mail":
 		_, timer := e.Data["timer"]

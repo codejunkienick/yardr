@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"yardr.dev/yardr/internal/peer"
 	"yardr.dev/yardr/internal/store"
@@ -18,6 +19,11 @@ import (
 func sessionYard(t *testing.T) (store.API, context.Context) {
 	t.Helper()
 	s := storetest.New(t)
+	return s, seedSessionYard(t, s)
+}
+
+func seedSessionYard(t *testing.T, s store.API) context.Context {
+	t.Helper()
 	ctx := context.Background()
 	if _, err := s.AddUser(ctx, "jo", "jo"); err != nil {
 		t.Fatal(err)
@@ -33,7 +39,7 @@ func sessionYard(t *testing.T) (store.API, context.Context) {
 	if _, err := s.PutCrew(ctx, store.CrewMember{Name: "yardmaster", Runner: "herdr"}, "jo"); err != nil {
 		t.Fatal(err)
 	}
-	return s, ctx
+	return ctx
 }
 
 // serveYardmaster serves users with the env files named, as crew set would.
@@ -305,42 +311,321 @@ func TestInboxSlices(t *testing.T) {
 	}
 }
 
-// A conversation ack's positional cursor can pass another user's mail.
-// Its mail_read event and the conversation's read state must stay scoped
-// to the session that acknowledged it.
-func TestMailReadReceiptStaysInSessionSlice(t *testing.T) {
+// The native RPC stream carries one receipt of each kind an ack passes
+// in its own slice. The stream and the cursor are checked on the same yard.
+func TestCrewInboxReceipts(t *testing.T) {
 	t.Parallel()
-	s, ctx := sessionYard(t)
+	s, raw := storetest.NewRPCOwned(t)
+	ctx := seedSessionYard(t, s)
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	serveYardmaster(t, s, ctx, "", map[string]string{"hal": "/tmp/hal.env"})
-	if err := s.CrewStartedFor(ctx, "yardmaster", "hal", map[string]any{"agent": "ym-hal"}); err != nil {
-		t.Fatal(err)
+	must(s.CrewStartedFor(ctx, "yardmaster", "hal", map[string]any{"agent": "ym-hal"}))
+	_, err := s.PutCrew(ctx, store.CrewMember{Name: "watcher", Runner: "herdr", On: []string{store.KindAttention}}, "jo")
+	must(err)
+	must(s.AddSubscription(ctx, "yardmaster", store.Subscription{Source: "telegram", Scope: store.ScopeAll}, "jo"))
+
+	check := func(t *testing.T, crew, session string, through uint64, change func() error, kinds ...string) {
+		t.Helper()
+		before := head(t, s)
+		streamCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		stream, err := s.Subscribe(streamCtx, before)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := change(); err != nil {
+			t.Fatal(err)
+		}
+		if n := head(t, s) - before; n != uint64(len(kinds)) {
+			t.Fatalf("new events = %v, want %v", kindsAfter(t, s, before), kinds)
+		}
+		for _, kind := range kinds {
+			select {
+			case e, ok := <-stream:
+				want := map[string]any{"reader": crew, "through": float64(through), "session": session}
+				if !ok || e.Kind != kind || e.Actor != crew || !maps.Equal(e.Data, want) {
+					t.Fatalf("stream event = %+v, want %s by %s with %v", e, kind, crew, want)
+				}
+			case <-streamCtx.Done():
+				t.Fatalf("stream did not carry %s: %v", kind, streamCtx.Err())
+			}
+		}
 	}
-	if err := s.Mail(ctx, "yardmaster", "from jo", "jo"); err != nil {
-		t.Fatal(err)
+	type ack struct {
+		name, session string
+		through       uint64
+		want          []string
 	}
-	if err := s.Mail(ctx, "yardmaster", "from hal", "hal"); err != nil {
-		t.Fatal(err)
+	acks := func(crew string, steps []ack) {
+		t.Helper()
+		for _, tc := range steps {
+			t.Run(tc.name, func(t *testing.T) {
+				check(t, crew, tc.session, tc.through, func() error {
+					if tc.session == "" {
+						return s.AckInbox(ctx, crew, tc.through)
+					}
+					return s.AckInboxFor(ctx, crew, tc.session, tc.through)
+				}, tc.want...)
+			})
+		}
 	}
-	through, err := s.Head(ctx)
-	if err != nil {
-		t.Fatal(err)
+	hook := func(text string) uint64 {
+		t.Helper()
+		seq, _, err := raw.RecordHook(ctx, "telegram", map[string]any{"source": "telegram", "type": "message", "text": text}, []byte(`{}`), nil)
+		must(err)
+		return seq
 	}
-	if err := s.AckInboxFor(ctx, "yardmaster", "hal", through); err != nil {
-		t.Fatal(err)
-	}
-	events, err := s.EventsSince(ctx, through, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(events) != 1 || events[0].Kind != "mail_read" || events[0].Data["session"] != "hal" {
-		t.Fatalf("ack receipt = %+v, want one mail_read for hal", events)
-	}
+
+	must(s.Mail(ctx, "yardmaster", "from jo", "jo"))
+	lineMail := head(t, s)
+	must(s.Mail(ctx, "yardmaster", "from hal", "hal"))
+	halMail := head(t, s)
+	acks("yardmaster", []ack{{"conversation mail alone", "hal", halMail, []string{"mail_read"}}})
 	conversation, _, err := s.Conversation(ctx, "jo", "yardmaster", 0, 0, 0)
-	if err != nil {
+	must(err)
+	if len(conversation) != 1 || conversation[0].Read {
+		t.Fatalf("jo's mail after hal's ack = %+v, want unread", conversation)
+	}
+
+	first, later := hook("first"), hook("later")
+	acks("yardmaster", []ack{
+		{"line mail alone, short of hook", "", lineMail, []string{"mail_read"}},
+		{"short of hook, no delivery in slice", "", halMail, nil},
+		{"conversation passes line hook", "hal", first, nil},
+		{"line acks first hook", "", first, []string{"inbox_read"}},
+		{"repeat", "", first, nil},
+		{"stale", "", halMail, nil},
+	})
+	acks("watcher", []ack{{"hook without delivery", "", first, nil}})
+	page, err := s.Inbox(ctx, "yardmaster", 0)
+	must(err)
+	r, err := s.GetCrew(ctx, "yardmaster")
+	must(err)
+	if page.Total != 1 || page.Last != later || r.Cursor != first || r.Notified != first {
+		t.Fatalf("after partial ack and retries: inbox %+v, cursor %d, notified %d; want only %d unread and both cursors at %d", page, r.Cursor, r.Notified, later, first)
+	}
+
+	acks("yardmaster", []ack{{"line acks later hook", "", later, []string{"inbox_read"}}})
+	must(s.React(ctx, halMail, "👀", "hal"))
+	reaction := head(t, s)
+	must(s.Mail(ctx, "yardmaster", "with hooks", "jo"))
+	hook("mixed first")
+	mixed := hook("mixed second")
+	acks("yardmaster", []ack{
+		{"line passes conversation reaction", "", reaction, nil},
+		{"conversation acks reaction", "hal", reaction, []string{"inbox_read"}},
+		{"mixed mail and multiple hooks", "", mixed, []string{"mail_read", "inbox_read"}},
+	})
+
+	must(s.AddSubscription(ctx, "yardmaster", store.Subscription{
+		Source: store.SourceYardr, Scope: store.ScopeAll, Where: map[string]string{"kind": "held"},
+	}, "jo"))
+	b, err := s.CreateBead(ctx, store.NewBead{Title: "needs help"}, "jo")
+	must(err)
+	_, err = s.SetHold(ctx, b.ID, true, store.Expect{}, "jo")
+	must(err)
+	held := head(t, s)
+	acks("watcher", []ack{{"--on attention delivery", "", held, []string{"inbox_read"}}})
+	acks("yardmaster", []ack{{"subscribed bead event", "", held, []string{"inbox_read"}}})
+
+	lineShown := hook("shown")
+	must(s.React(ctx, halMail, "👍", "hal"))
+	halShown := head(t, s)
+	for _, tc := range []struct {
+		name, session string
+		through       uint64
+		want          []string
+	}{
+		{"show line inbox", "", lineShown, []string{"inbox_shown"}},
+		{"repeat shown mark", "", lineShown, nil},
+		{"stale shown mark", "", held, nil},
+		{"show conversation inbox", "hal", halShown, []string{"inbox_shown"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			check(t, "yardmaster", tc.session, tc.through, func() error {
+				return s.MarkNotifiedFor(ctx, "yardmaster", tc.session, tc.through)
+			}, tc.want...)
+		})
+	}
+}
+
+// Another member's inbox read and shown receipts never reach a crew inbox
+// through --on, on the line or in a session slice: each stays with its
+// reader. mail_read still matches through --on, as the released pack API
+// promises. The reader's own inbox holds none either, as its own action.
+func TestCrewInboxReceiptsStayWithReader(t *testing.T) {
+	t.Parallel()
+	s, raw := storetest.NewRPCOwned(t)
+	ctx := seedSessionYard(t, s)
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	serveYardmaster(t, s, ctx, "", map[string]string{"hal": "/tmp/hal.env"})
+	must(s.CrewStartedFor(ctx, "yardmaster", "hal", map[string]any{"agent": "ym-hal"}))
+	r, err := s.GetCrew(ctx, "yardmaster")
+	must(err)
+	def := *r
+	def.On = []string{"mail_read", "inbox_read", "inbox_shown"}
+	if _, err := s.PutCrew(ctx, def, "jo"); err != nil {
 		t.Fatal(err)
 	}
-	if len(conversation) != 1 || conversation[0].Read {
-		t.Errorf("jo's conversation mail after hal's ack = %+v, want unread", conversation)
+	if _, err := s.PutCrew(ctx, store.CrewMember{Name: "watcher", Runner: "herdr", On: []string{store.KindAttention}}, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	must(s.AddSubscription(ctx, "watcher", store.Subscription{Source: "telegram", Scope: store.ScopeAll}, "jo"))
+
+	before := head(t, s)
+	must(s.Mail(ctx, "watcher", "hi", "jo"))
+	mail := head(t, s)
+	hook := func(text string) uint64 {
+		t.Helper()
+		seq, _, err := raw.RecordHook(ctx, "telegram", map[string]any{"source": "telegram", "type": "message", "text": text}, []byte(`{}`), nil)
+		must(err)
+		return seq
+	}
+	first := hook("first")
+	must(s.AckInbox(ctx, "watcher", mail))
+	must(s.AckInbox(ctx, "watcher", first))
+	shown := hook("shown")
+	must(s.MarkNotifiedFor(ctx, "watcher", "", shown))
+	must(s.AckInbox(ctx, "watcher", shown))
+
+	var receipts []store.Event
+	for _, e := range kindsAfter(t, s, before) {
+		switch e.Kind {
+		case "mail_read", "inbox_read", "inbox_shown":
+			receipts = append(receipts, e)
+		}
+	}
+	if len(receipts) != 4 {
+		t.Fatalf("receipts after watcher's acks = %v, want mail_read, two inbox_read and inbox_shown", kindsAfter(t, s, before))
+	}
+	for _, e := range receipts {
+		if e.Actor != "watcher" || e.Data["reader"] != "watcher" {
+			t.Fatalf("receipt = %+v, want actor and reader watcher", e)
+		}
+	}
+	line, err := s.Inbox(ctx, "yardmaster", 10)
+	must(err)
+	var got []string
+	for _, e := range line.Events {
+		if reader, _ := e.Data["reader"].(string); reader == "watcher" {
+			got = append(got, e.Kind)
+		}
+	}
+	if !slices.Equal(got, []string{"mail_read"}) {
+		t.Fatalf("watcher's receipts in yardmaster line inbox = %v, want [mail_read]", got)
+	}
+	hal, err := s.InboxFor(ctx, "yardmaster", "hal", 10)
+	must(err)
+	for _, e := range hal.Events {
+		if reader, _ := e.Data["reader"].(string); reader == "watcher" {
+			t.Fatalf("yardmaster hal slice holds watcher's %s: %+v", e.Kind, hal.Events)
+		}
+	}
+	own, err := s.Inbox(ctx, "watcher", 10)
+	must(err)
+	if own.Total != 0 {
+		t.Fatalf("watcher inbox after its acks = %+v, want empty", own.Events)
+	}
+}
+
+// A replacement session's recovery summary shows the member's own inbox read
+// and shown receipts but never another member's; mail_read is shown as
+// before, whatever its reader.
+func TestCrewPrimeHidesOtherMembersReceipts(t *testing.T) {
+	// Sequential: the package's fake clock.
+	at := time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC)
+	store.SetClockForTest(func() time.Time { return at })
+	t.Cleanup(func() { store.SetClockForTest(time.Now) })
+	s, raw := storetest.NewRPCOwned(t)
+	ctx := seedSessionYard(t, s)
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.PutCrew(ctx, store.CrewMember{Name: "watcher", Runner: "herdr", On: []string{store.KindAttention}}, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	must(s.AddSubscription(ctx, "watcher", store.Subscription{Source: "telegram", Scope: store.ScopeAll}, "jo"))
+	must(s.AddSubscription(ctx, "yardmaster", store.Subscription{Source: "telegram", Scope: store.ScopeAll}, "jo"))
+	must(s.CrewStarted(ctx, "yardmaster", nil))
+	at = at.Add(time.Second)
+	before := head(t, s)
+	hook := func(text string) uint64 {
+		t.Helper()
+		seq, _, err := raw.RecordHook(ctx, "telegram", map[string]any{"source": "telegram", "type": "message", "text": text}, []byte(`{}`), nil)
+		must(err)
+		return seq
+	}
+	must(s.Mail(ctx, "watcher", "hi", "jo"))
+	mail := head(t, s)
+	first := hook("first")
+	must(s.AckInbox(ctx, "watcher", mail))
+	must(s.AckInbox(ctx, "watcher", first))
+	shown := hook("shown")
+	must(s.MarkNotifiedFor(ctx, "watcher", "", shown))
+	must(s.AckInbox(ctx, "watcher", shown))
+	must(s.Mail(ctx, "yardmaster", "hey", "jo"))
+	ownMail := head(t, s)
+	ownHook := hook("own")
+	must(s.AckInbox(ctx, "yardmaster", ownMail))
+	must(s.MarkNotifiedFor(ctx, "yardmaster", "", ownHook))
+	must(s.AckInbox(ctx, "yardmaster", ownHook))
+
+	var receipts []store.Event
+	for _, e := range kindsAfter(t, s, before) {
+		switch e.Kind {
+		case "mail_read", "inbox_read", "inbox_shown":
+			receipts = append(receipts, e)
+		}
+	}
+	if len(receipts) != 8 {
+		t.Fatalf("receipts after both members' acks = %v, want 4 from each", kindsAfter(t, s, before))
+	}
+
+	// The session ends without a handoff: the next prime falls back to
+	// what happened since the first start.
+	must(s.CrewStarted(ctx, "yardmaster", nil))
+	p, err := s.CrewPrime(ctx, "yardmaster")
+	must(err)
+	if !p.NoHandoff {
+		t.Fatal("prime after a start with no handoff has no recovery summary")
+	}
+	for _, e := range p.Recent {
+		if reader, _ := e.Data["reader"].(string); (e.Kind == "inbox_read" || e.Kind == "inbox_shown") && reader == "watcher" {
+			t.Fatalf("recovery summary holds watcher's %s: %+v", e.Kind, p.Recent)
+		}
+	}
+	var ownRead, ownShown, otherMail bool
+	for _, e := range p.Recent {
+		reader, _ := e.Data["reader"].(string)
+		switch {
+		case (e.Kind == "inbox_read" || e.Kind == "inbox_shown") && reader == "yardmaster":
+			ownRead = ownRead || e.Kind == "inbox_read"
+			ownShown = ownShown || e.Kind == "inbox_shown"
+		case e.Kind == "mail_read" && reader == "watcher":
+			otherMail = true
+		}
+	}
+	if !ownRead || !ownShown {
+		t.Fatalf("recovery summary lost yardmaster's own receipts: %+v", p.Recent)
+	}
+	if !otherMail {
+		t.Fatalf("recovery summary lost watcher's mail_read: %+v", p.Recent)
+	}
+	if p.EventCounts["inbox_read"] != 2 || p.EventCounts["inbox_shown"] != 1 || p.EventCounts["mail_read"] != 2 {
+		t.Fatalf("recovery counts = %v, want inbox_read 2, inbox_shown 1, mail_read 2", p.EventCounts)
 	}
 }
 

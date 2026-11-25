@@ -842,6 +842,9 @@ func TestCrewMemberAtAFailedTurnIsNotNudged(t *testing.T) {
 	// on the first pass after, and the mail is nudged once, for both items.
 	now = now.Add(time.Hour)
 	pass("an hour on", 1, 0)
+	checkInboxShown(t, s)
+	page, err := s.Inbox(ctx, "yardmaster", 0)
+	must(t, err)
 	f.show(piIdle)
 	pass("the pane clear", 1, 1)
 	if !strings.Contains(f.nudges[0], "2 new in your inbox") {
@@ -851,6 +854,7 @@ func TestCrewMemberAtAFailedTurnIsNotNudged(t *testing.T) {
 		t.Fatalf("handle keeps %v with the line gone from the pane", mark)
 	}
 	pass("nudged already", 1, 1)
+	checkInboxShown(t, s, page.Last)
 
 	// Nudged as before from then on, and a failure after it is told anew.
 	must(t, s.Mail(ctx, "yardmaster", "and one more", "chris"))

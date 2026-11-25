@@ -176,11 +176,13 @@ var eventDataTold = map[string][]string{
 	"notifications_read":    {"reader", "through"},
 	"push_failed":           {"reason", "seqs", "source", "status", "tries", "user"},
 
-	// Mail goes whole to its parties, as the listener decides who they are
-	// (rpc.UserServer.deviceEvent), and to no one else.
-	"mail":      {toldWhole},
-	"mail_read": {toldWhole},
-	"reaction":  {toldWhole},
+	// Mail and inbox receipts go whole to their parties, as the listener
+	// decides who they are (rpc.UserServer.deviceEvent).
+	"inbox_read":  {toldWhole},
+	"inbox_shown": {toldWhole},
+	"mail":        {toldWhole},
+	"mail_read":   {toldWhole},
+	"reaction":    {toldWhole},
 
 	// Sources, hooks and what they carry. The file a source reads its
 	// credential from, the command it mints a token with, the base of its
@@ -419,7 +421,7 @@ func EventFor(viewer string, operator bool, e Event) (Event, bool) {
 		// sender's alone. Nobody is party to none, whatever an event
 		// with no actor, or mail that left, says: both read as "".
 		return e, viewer != "" && (e.Actor == viewer || MailReceiver(e) == viewer)
-	case "mail_read":
+	case "mail_read", "inbox_read", "inbox_shown":
 		// The reader alone: who wrote what was read is not named, so a
 		// sender reads again whether its mail was read.
 		reader, _ := e.Data["reader"].(string)

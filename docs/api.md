@@ -382,6 +382,62 @@ A user or a crew member acknowledged its mail: either everything through `data.t
 | `data.through` | number, may be absent | through which seq; absent on an acknowledgement of one letter |
 | `data.seq` | number, may be absent | the one letter read; absent on an acknowledgement through |
 
+### Crew inbox was read: `inbox_read`
+
+A crew member acknowledged its inbox through at least one non-mail delivery, such as a hook, reaction, subscribed event or `--on` kind. Mail in the acknowledged slice still produces its own `mail_read` receipt.
+
+```json
+{
+  "seq": 281,
+  "kind": "inbox_read",
+  "actor": "signalman",
+  "data": {
+    "reader": "signalman",
+    "session": "",
+    "through": 279
+  },
+  "at": "2026-10-08T09:30:00Z"
+}
+```
+
+| field | type | |
+|---|---|---|
+| `seq` | number | the event's seq |
+| `kind` | string | `inbox_read` |
+| `actor` | string | the crew member |
+| `at` | time | when |
+| `data.reader` | string | the crew member |
+| `data.through` | number | the seq acknowledged through |
+| `data.session` | string | `""` for the line session, or the user of the conversation session |
+
+### Crew inbox was shown: `inbox_shown`
+
+The yard typed an inbox line into a crew member's pane and advanced its notified mark. The inbox stays unread until the member acknowledges it.
+
+```json
+{
+  "seq": 280,
+  "kind": "inbox_shown",
+  "actor": "signalman",
+  "data": {
+    "reader": "signalman",
+    "session": "",
+    "through": 279
+  },
+  "at": "2026-10-08T09:30:00Z"
+}
+```
+
+| field | type | |
+|---|---|---|
+| `seq` | number | the event's seq |
+| `kind` | string | `inbox_shown` |
+| `actor` | string | the crew member |
+| `at` | time | when |
+| `data.reader` | string | the crew member |
+| `data.through` | number | the newest unread event when shown |
+| `data.session` | string | `""` for the line session, or the user of the conversation session |
+
 ### A reaction on mail: `reaction`
 
 A party to a letter put an emoji on it, or took theirs away. Read the conversation with the other party again then: `reactions` on the letter of `data.seq` is what it now holds.
@@ -1012,10 +1068,10 @@ nothing else. What is not the same:
   `trust`, `greet`, `for`, `open_threads`, `set_state` and `mail_peers`,
   and no other key. The rest of each record is sent as it is, and the
   socket tells the whole record.
-- **The stream carries the device's own mail alone**: a `mail`, `mail_read`
-  or `reaction` event is sent only to a device of its sender or its
-  receiver (a read receipt to its reader alone), however far back the
-  stream replays; anything between two others is left out. A `hook`
+- **The stream carries the device's own mail alone**: a `mail` or `reaction`
+  event is sent only to its parties, and a `mail_read`, `inbox_read` or
+  `inbox_shown` receipt only to its reader, however far back the stream
+  replays. A `hook`
   delivery goes out to every device, as a bead's events do, and so does
   the [`hook_files`](#a-hook-deliverys-files-arrived-hook_files) that says
   its files are recorded.

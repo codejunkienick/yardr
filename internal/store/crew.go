@@ -1011,11 +1011,11 @@ func reactionPreview(text string) string {
 
 // forCrew reports whether e belongs in r's inbox: mail to it, a reaction to
 // its own mail, a hook or bead event its subscriptions delivered to it when
-// logged, or a kind it hears of through --on, never its own actions nor
-// yardr telling of itself (aboutItself). --on works as implicit
-// "yardr all kind=<k>" subscriptions, checked when the inbox is read, and
-// also covers events not about a bead. A word of --on may be a class
-// (KindAttention): what it holds is looked up here, each time.
+// logged, or a kind it hears of through --on except an inbox read or shown
+// receipt, never its own actions nor yardr telling of itself (aboutItself).
+// --on works as implicit "yardr all kind=<k>" subscriptions, checked when
+// the inbox is read, and also covers events not about a bead. A word of --on
+// may be a class (KindAttention): what it holds is looked up here, each time.
 func forCrew(r *CrewMember, e Event) bool {
 	if e.Actor == r.Name || (e.Bead != nil && aboutItself(r, *e.Bead, e.Kind)) {
 		return false
@@ -1033,7 +1033,7 @@ func forCrew(r *CrewMember, e Event) bool {
 	case "hook":
 		return Reason(e, r.Name) != ""
 	}
-	return Reason(e, r.Name) != "" || slices.ContainsFunc(kindWords(EventKind(e.Kind)), func(word string) bool {
+	return Reason(e, r.Name) != "" || !ReceiptStaysWithReader(e.Kind) && slices.ContainsFunc(kindWords(EventKind(e.Kind)), func(word string) bool {
 		return slices.Contains(r.On, word)
 	})
 }
@@ -1123,18 +1123,9 @@ func (s *Store) InboxFor(ctx context.Context, name, user string, limit int) (*In
 		if err != nil {
 			return err
 		}
-		var evs []Event
-		for _, k := range inboxKeysFrom(tx, r, cursor) {
-			var e Event
-			if ok, err := get(tx, bEvents, k, &e); err != nil {
-				return err
-			} else if ok {
-				evs = append(evs, e)
-			}
-		}
+		evs, err := inboxEventsBetween(tx, r, cursor, 0)
 		s.inboxReads.Add(int64(len(evs)))
-		named(tx, evs) // forCrew compares handles
-		if err := peersToday(tx, evs); err != nil {
+		if err != nil {
 			return err
 		}
 		for _, e := range evs {
@@ -1209,19 +1200,27 @@ func forSlice(r *CrewMember, user string, e Event) bool {
 	}
 }
 
-// inboxKeysFrom are the event keys after cursor that may be in r's inbox,
+func inboxKeysFrom(tx *bolt.Tx, r *CrewMember, cursor uint64) []string {
+	return inboxKeysBetween(tx, r, cursor, 0)
+}
+
+// inboxKeysBetween are the event keys after cursor that may be in r's inbox,
 // in seq order: its inbox index entries and those of the kinds it hears of
 // through --on. The cursor is one session's, so the keys are that session's
-// slice of the same index entries.
-func inboxKeysFrom(tx *bolt.Tx, r *CrewMember, cursor uint64) []string {
-	from := seqKey(cursor + 1)
+// slice of the same index entries. A through of zero leaves it unbounded.
+func inboxKeysBetween(tx *bolt.Tx, r *CrewMember, cursor, through uint64) []string {
+	from, to := seqKey(cursor+1), seqKey(through)
 	seen := map[string]bool{}
 	var out []string
 	scan := func(b []byte, prefix string) {
 		c := tx.Bucket(b).Cursor()
 		p := []byte(prefix + "\x00")
 		for k, _ := c.Seek([]byte(prefix + "\x00" + from)); k != nil && bytes.HasPrefix(k, p); k, _ = c.Next() {
-			if sk := string(k[len(p):]); !seen[sk] {
+			sk := string(k[len(p):])
+			if through != 0 && sk > to {
+				break
+			}
+			if !seen[sk] {
 				seen[sk] = true
 				out = append(out, sk)
 			}
@@ -1368,10 +1367,7 @@ func (s *Store) CrewPrimeFor(ctx context.Context, name, user string) (*Prime, er
 				if !e.At.After(from) {
 					break
 				}
-				p.EventCounts[e.Kind]++
-				if len(p.Recent) < PrimeFallback {
-					p.Recent = append(p.Recent, e)
-				}
+				p.addRecent(name, e)
 			}
 			slices.Reverse(p.Recent)
 			named(tx, p.Recent)

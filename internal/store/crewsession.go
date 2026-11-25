@@ -378,15 +378,18 @@ func (s *Store) MarkRotationAskedFor(ctx context.Context, name, user string) err
 	})
 }
 
-// MarkNotifiedFor is MarkNotified for one session. The daemon's alone
-// (daemonOnly): only it nudges crew sessions.
+// MarkNotifiedFor is MarkNotified for one session. Only the daemon nudges
+// crew sessions. A mark that advances records what it typed as inbox_shown.
 func (s *Store) MarkNotifiedFor(ctx context.Context, name, user string, seq uint64) error {
 	if err := s.daemonOnly(ctx, "MarkNotifiedFor"); err != nil {
 		return err
 	}
-	return s.changeCrewSession(name, user, func(_ *wtx, _ *CrewMember, st *CrewSession) error {
-		st.Notified = max(st.Notified, seq)
-		return nil
+	return s.changeCrewSession(name, user, func(w *wtx, _ *CrewMember, st *CrewSession) error {
+		if seq <= st.Notified {
+			return nil
+		}
+		st.Notified = seq
+		return w.event("", "inbox_shown", name, crewInboxReceipt(name, user, seq))
 	})
 }
 
@@ -441,6 +444,123 @@ func (s *Store) AckInboxFor(ctx context.Context, name, user string, through uint
 		was := st.Cursor
 		st.Cursor = max(st.Cursor, through)
 		st.Notified = max(st.Notified, st.Cursor)
-		return w.crewMailRead(r, user, was, st.Cursor)
+		return w.crewInboxRead(r, user, was, st.Cursor)
 	})
+}
+
+// inboxEventsBetween resolves inbox candidates as the session will see them.
+func inboxEventsBetween(tx *bolt.Tx, r *CrewMember, cursor, through uint64) ([]Event, error) {
+	var evs []Event
+	for _, k := range inboxKeysBetween(tx, r, cursor, through) {
+		var e Event
+		if ok, err := get(tx, bEvents, k, &e); err != nil {
+			return nil, err
+		} else if ok {
+			evs = append(evs, e)
+		}
+	}
+	named(tx, evs) // forCrew compares handles
+	return evs, peersToday(tx, evs)
+}
+
+// crewInboxRead logs one receipt of each kind in the newly acknowledged slice.
+func (w *wtx) crewInboxRead(r *CrewMember, session string, was, through uint64) error {
+	if through <= was {
+		return nil
+	}
+	evs, err := inboxEventsBetween(w.Tx, r, was, through)
+	if err != nil {
+		return err
+	}
+	var mail, other bool
+	for _, e := range evs {
+		if forSlice(r, session, e) {
+			mail = mail || e.Kind == "mail"
+			other = other || e.Kind != "mail"
+			if mail && other {
+				break
+			}
+		}
+	}
+	if mail {
+		if err := w.event("", "mail_read", r.Name, crewInboxReceipt(r.Name, session, through)); err != nil {
+			return err
+		}
+	}
+	if other {
+		return w.event("", "inbox_read", r.Name, crewInboxReceipt(r.Name, session, through))
+	}
+	return nil
+}
+
+func crewInboxReceipt(reader, session string, through uint64) map[string]any {
+	return map[string]any{"reader": reader, "through": through, "session": session}
+}
+
+// ReceiptStaysWithReader reports whether kind is a crew inbox read or shown
+// receipt (inbox_read, inbox_shown): it reaches no crew inbox through --on,
+// only its reader sees it on the stream. mail_read is not one: it is a
+// released crew listener (docs/pack-api.md) and still matches through --on.
+func ReceiptStaysWithReader(kind string) bool {
+	return kind == "inbox_read" || kind == "inbox_shown"
+}
+
+// PrimeShows reports whether member's recovery summary shows e: a receipt
+// that stays with its reader only when member is its reader, anything else
+// always. The prime renders full payloads, so another member's read or shown
+// receipt would leak its session and cursor; mail_read is shown as before.
+func PrimeShows(member string, e Event) bool {
+	if !ReceiptStaysWithReader(e.Kind) {
+		return true
+	}
+	reader, _ := e.Data["reader"].(string)
+	if reader == "" {
+		reader = e.Actor
+	}
+	return reader == member
+}
+
+// addRecent counts e and keeps it for the recovery summary, unless it is
+// another member's read or shown receipt.
+func (p *Prime) addRecent(member string, e Event) {
+	if !PrimeShows(member, e) {
+		return
+	}
+	p.EventCounts[e.Kind]++
+	if len(p.Recent) < PrimeFallback {
+		p.Recent = append(p.Recent, e)
+	}
+}
+
+// OnInbox is the inbox a crew member's --on word reaches: the member's own,
+// or none for a receipt that stays with its reader. The subscription matrix
+// reports it, as forCrew matches it.
+func OnInbox(member, word string) string {
+	if ReceiptStaysWithReader(word) {
+		return ""
+	}
+	return member
+}
+
+// SubInbox is the inbox an explicit subscription reaches: the holder's own,
+// or none for a yardr subscription naming only receipts that stay with
+// their reader. Those receipts are beadless and never match an explicit
+// yardr subscription (only the upgrade's failure kinds and a quiet hook
+// are matched without a bead), so such a filter reaches no inbox; one
+// naming another kind beside them still reaches. The subscription matrix
+// reports it, as deliverBeadless matches them.
+func SubInbox(holder string, sub Subscription) string {
+	if sub.Source == SourceYardr {
+		if kinds, ok := sub.Where["kind"]; ok {
+			for _, word := range WhereValues(kinds) {
+				for _, k := range KindsOf(word) {
+					if !ReceiptStaysWithReader(k) {
+						return holder
+					}
+				}
+			}
+			return ""
+		}
+	}
+	return holder
 }

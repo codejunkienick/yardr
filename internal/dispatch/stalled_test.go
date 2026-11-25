@@ -113,6 +113,9 @@ func TestNudgeForAnAgentAtADialogIsHeldAndSaidOnce(t *testing.T) {
 	if ev.Data["crew"] != "yardmaster" || !strings.Contains(fmt.Sprint(ev.Data["reason"]), "dialog") {
 		t.Fatalf("nudge_held = %+v", ev.Data)
 	}
+	checkInboxShown(t, s)
+	page, err := s.Inbox(context.Background(), "yardmaster", 0)
+	must(t, err)
 	f.atDialog = false
 	later(time.Minute)
 	later(time.Minute)
@@ -126,6 +129,7 @@ func TestNudgeForAnAgentAtADialogIsHeldAndSaidOnce(t *testing.T) {
 	if n, _ := kindCount(t, s, r.Journal, "nudge_held"); n != 2 || len(f.nudges) != 1 {
 		t.Fatalf("at a dialog again: nudge_held %d times, nudges %q", n, f.nudges)
 	}
+	checkInboxShown(t, s, page.Last)
 }
 
 // The dispatcher's delivery of a pending first prompt goes the same way.
