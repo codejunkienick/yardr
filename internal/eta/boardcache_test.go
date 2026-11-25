@@ -155,20 +155,84 @@ func TestArrivalsBoardEvictsStalestPastCap(t *testing.T) {
 	}
 }
 
+// boardStage is the stage of the board's flows named stage.
+func boardStage(b *store.FlowsBoard, stage string) (store.FlowsStage, bool) {
+	for _, d := range b.Depots {
+		for _, f := range d.Flows {
+			for _, s := range f.Stages {
+				if s.Stage == stage {
+					return s, true
+				}
+			}
+		}
+	}
+	return store.FlowsStage{}, false
+}
+
+// foldWord is a stage's fold as the board serves it: its number, or none.
+func foldWord(fold *int) string {
+	if fold == nil {
+		return "none"
+	}
+	return fmt.Sprint(*fold)
+}
+
 // The flows board stands while the head stands, as the arrivals board
-// does, and a shaping of one copy (a depot's error) reaches no other.
+// does, and a shaping of one copy (a depot's error) reaches no other. A
+// stage's fold stands with it: the cache copies a stage's fields one by one,
+// so one it forgets is dropped from every board it serves.
 func TestFlowsBoardReusedWhileHeadStands(t *testing.T) {
 	t.Parallel()
 	y, ctx := boardYard(t)
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A depot whose stages go to a siding (a manual group that states a fold
+	// of 3, where it would take 4 unstated), to a manual group that states
+	// none and to an agent group: only the siding's stage says a fold.
+	must(y.PutGroup(ctx, store.Group{Name: "sidings", Runner: "manual", Limit: 50, Config: map[string]any{"fold": 3}}, "me"))
+	must(y.PutGroup(ctx, store.Group{Name: "clerks", Runner: "manual", Limit: 50}, "me"))
+	must(y.PutGroup(ctx, store.Group{Name: "builders", Runner: "herdr", Limit: 1}, "me"))
+	must(y.PutDepot(ctx, store.Depot{Name: "shop", Path: t.TempDir(), Kind: store.DepotDir}, "me"))
+	flow, err := store.ParseFlow("folding -> waiting\nwaiting -> building\n")
+	must(err)
+	flow.Name = "code"
+	_, err = y.PutFlow(ctx, *flow, "me")
+	must(err)
+	must(y.SetFlowPointer(ctx, "shop", "", "code", "me"))
+	wants := []struct{ stage, group, fold string }{
+		{"folding", "sidings", "3"},
+		{"waiting", "clerks", "none"},
+		{"building", "builders", "none"},
+	}
+	for _, w := range wants {
+		_, err = y.AddRoute(ctx, store.Route{Stage: w.stage, Group: w.group}, "me")
+		must(err)
+	}
+	wantFold := func(name string, b *store.FlowsBoard) {
+		t.Helper()
+		for _, w := range wants {
+			s, ok := boardStage(b, w.stage)
+			if !ok || s.Group != w.group || foldWord(s.Fold) != w.fold {
+				t.Errorf("%s board: stage %s (found: %v) has group %q and fold %s, want group %q and fold %s",
+					name, w.stage, ok, s.Group, foldWord(s.Fold), w.group, w.fold)
+			}
+		}
+	}
 
 	first, err := eta.FlowsViaStore(ctx, y, "", boardNow)
 	if err != nil {
 		t.Fatal(err)
 	}
+	wantFold("first", first)
 	second, err := eta.FlowsViaStore(ctx, y, "", boardNow)
 	if err != nil {
 		t.Fatal(err)
 	}
+	wantFold("second", second)
 	if !reflect.DeepEqual(first, second) {
 		t.Errorf("second board = %+v, want the first's answer", second)
 	}
@@ -184,5 +248,6 @@ func TestFlowsBoardReusedWhileHeadStands(t *testing.T) {
 		if third.Depots[0].Error == "shaped by its caller" {
 			t.Errorf("a caller's shaping reached the kept board: %+v", third.Depots[0])
 		}
+		wantFold("third", third)
 	}
 }

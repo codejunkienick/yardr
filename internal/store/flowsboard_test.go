@@ -859,7 +859,9 @@ func TestFlowsTerminal(t *testing.T) {
 
 // TestFlowsSeats pins the seats each stage serves: a group routed at two
 // stages serves one shared yard-wide taken count on both; a stage no route
-// matches serves neither field, and a paused group's limit stands as 0.
+// matches serves neither field, and a paused group's limit stands as 0. It
+// pins the fold a siding's stage serves beside them, the group's own number,
+// and that no other stage serves one.
 func TestFlowsSeats(t *testing.T) {
 	// Sequential: the package's fake clock and process environment (via newArrivalsTest).
 	y := newArrivalsTest(t)
@@ -870,7 +872,7 @@ func TestFlowsSeats(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	y.flowDepot(t, "shop", "code", "new", "review", "done", "siding")
+	y.flowDepot(t, "shop", "code", "new", "review", "done", "siding", "decide", "folding")
 	must(y.PutGroup(ctx, store.Group{Name: "mothballed", Runner: "herdr", Limit: 1}, "me"))
 	paused := 0
 	_, err := y.SetGroup(ctx, "mothballed", store.GroupEdit{Limit: &paused}, "me")
@@ -879,9 +881,14 @@ func TestFlowsSeats(t *testing.T) {
 	must(err)
 	_, err = y.AddRoute(ctx, store.Route{Stage: "done", Group: "mothballed"}, "me")
 	must(err)
-	// Siding is routed nowhere. Builders (limit 10) works new and review,
-	// with a live session at each; the mothballed group is paused, so its
-	// stage's bead stands unclaimed.
+	// A siding is a manual group that states a fold: 3 here, where unstated
+	// it would be 4. The plain manual group, deciders, already works decide.
+	must(y.PutGroup(ctx, store.Group{Name: "sidings", Runner: "manual", Limit: 50, Members: []string{"nell"}, Config: map[string]any{"fold": 3}}, "me"))
+	_, err = y.AddRoute(ctx, store.Route{Stage: "folding", Group: "sidings"}, "me")
+	must(err)
+	// The stage called siding is routed nowhere. Builders (limit 10) works
+	// new and review, with a live session at each; the mothballed group is
+	// paused, so its stage's bead stands unclaimed.
 	run := y.travel(t, "run", "shop", "new")
 	if _, err := y.Claim(ctx, run.ID, "builders", "new", "yard"); err != nil {
 		t.Fatal(err)
@@ -952,6 +959,38 @@ func TestFlowsSeats(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), `"limit":0`) || !strings.Contains(string(raw), `"taken":0`) {
 		t.Errorf("done omits its zero seats from JSON: %s", raw)
+	}
+
+	// The fold is the siding group's number, served on its stage alone: the
+	// plain manual group's stage (decide) and the agent groups' (new, review,
+	// done), and the one routed nowhere, serve none.
+	if got, ok := deref(stages["folding"].Fold); !ok || got != 3 {
+		t.Errorf("folding fold = %d, %v, want 3, served: the group's own", got, ok)
+	}
+	if got := stages["folding"].Group; got != "sidings" {
+		t.Errorf("folding group = %q, want sidings", got)
+	}
+	for _, st := range []string{"new", "review", "done", "siding", "decide"} {
+		if fold := stages[st].Fold; fold != nil {
+			t.Errorf("%s fold = %d, want it absent: its group is no siding", st, *fold)
+		}
+	}
+	if got := stages["decide"].Group; got != "deciders" {
+		t.Errorf("decide group = %q, want deciders, a manual group that states no fold", got)
+	}
+	raw, err = json.Marshal(stages["folding"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"fold":3`) {
+		t.Errorf("folding omits its fold from JSON: %s", raw)
+	}
+	raw, err = json.Marshal(stages["decide"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), `"fold":`) {
+		t.Errorf("decide serves a fold in JSON: %s", raw)
 	}
 }
 

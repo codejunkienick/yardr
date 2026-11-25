@@ -86,8 +86,13 @@ type FlowsStage struct {
 	// yard, the same number on every stage routed to the group. Both are
 	// absent where no route matches, so a reader can tell an unrouted
 	// stage from a paused one.
-	Limit *int       `json:"limit,omitempty"`
-	Taken *int       `json:"taken,omitempty"`
+	Limit *int `json:"limit,omitempty"`
+	Taken *int `json:"taken,omitempty"`
+	// Fold is how many waiting beads fill one fold, set where the routed
+	// group is a siding (SidingOf) and absent on every other stage. The
+	// group's config is not in this view, and a siding that states no fold
+	// takes SidingFold, so a reader could not work the number out.
+	Fold  *int       `json:"fold,omitempty"`
 	Beads []FlowBead `json:"beads"`
 }
 

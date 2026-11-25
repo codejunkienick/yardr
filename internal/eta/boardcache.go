@@ -205,7 +205,7 @@ func cloneArrivalBoard(b *ArrivalBoard) *ArrivalBoard {
 // does: every slice of rows down to a stage's beads is the caller's
 // own, so shaping one (a depot's error, a stage's beads) leaves the
 // kept board whole. A bead's entered-stage instant and a stage's seat
-// counts are shared, as no caller writes through them.
+// counts and fold are shared, as no caller writes through them.
 func cloneFlowsBoard(b *store.FlowsBoard) *store.FlowsBoard {
 	if b == nil {
 		return nil
@@ -223,7 +223,7 @@ func cloneFlowsBoard(b *store.FlowsBoard) *store.FlowsBoard {
 			for k, s := range f.Stages {
 				nf.Stages[k] = store.FlowsStage{Stage: s.Stage, Group: s.Group,
 					Human: s.Human, Lamp: s.Lamp, Terminal: s.Terminal,
-					Limit: s.Limit, Taken: s.Taken, Beads: slices.Clone(s.Beads)}
+					Limit: s.Limit, Taken: s.Taken, Fold: s.Fold, Beads: slices.Clone(s.Beads)}
 			}
 			nd.Flows[j] = nf
 		}

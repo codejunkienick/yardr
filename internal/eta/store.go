@@ -632,6 +632,14 @@ func flowsViaStore(ctx context.Context, st store.API, viewer string, now time.Ti
 						}
 						limit, n := g.Limit, taken[fs.Group]
 						fs.Limit, fs.Taken = &limit, &n
+						// A siding's stage says how many waiting beads fill a
+						// fold. SidingOf is the one reader of that number and
+						// of its default, so the board never says one of its
+						// own.
+						if si, ok := store.SidingOf(g); ok {
+							fold := si.Fold
+							fs.Fold = &fold
+						}
 					}
 				}
 				ff.Stages = append(ff.Stages, fs)
