@@ -111,8 +111,9 @@ type copyItem struct {
 	replaced bool
 	files    []copyFile
 	// stale are the stage files of a replaced copy that the new copy has no
-	// file for, as the stage names they stand under (strayHomeStageFiles): they
-	// are removed, so that none of the old copy is read as the new one's.
+	// file for, as the stage names they stand under (strayHomeStageFiles), less
+	// any that is the file of a stage it keeps (withoutKeptFiles): they are
+	// removed, so that none of the old copy is read as the new one's.
 	stale []string
 	back  string // the command that points the pointer back at the repository
 }
@@ -298,6 +299,9 @@ func (w *wtx) planCopyItem(repo *RepoFlows, df DepotFlow, marked map[string]bool
 		if it.stale, err = strayHomeStageFiles(dir, "", keep); err != nil {
 			return it, fmt.Errorf("flow %s: %w", it.target, err)
 		}
+		if it.stale, err = withoutKeptFiles(dir, it.stale, it.files); err != nil {
+			return it, fmt.Errorf("flow %s: %w", it.target, err)
+		}
 	}
 	return it, nil
 }
@@ -403,6 +407,38 @@ func strayHomeStageFiles(dir, rel string, keep map[string]bool) ([]string, error
 			if _, err := stageRel(stage); err != nil {
 				return nil, fmt.Errorf("%s has a name no stage can have (each slash-separated part starts with a letter or digit and holds only letters, digits, '.', '_' and '-'), so the yard cannot keep its text before the copy removes it with the files of the copy it replaces: move it out of the flow's directory, or rename it, then copy again", p)
 			}
+			out = append(out, stage)
+		}
+	}
+	return out, nil
+}
+
+// withoutKeptFiles drops from stale, the stage names strayHomeStageFiles listed
+// under dir, each whose file is the file of one of the stages the copy keeps
+// (files). A file system that folds case in file names answers the path of a
+// kept stage with an entry of the earlier copy that differs from it only in case
+// (Review.md for review): the write puts the new text in that entry, which keeps
+// the name it has, so removing it as stale would remove the file just written.
+// The files are compared, not their names, so that where the file system does
+// not fold, and the two are two files, the earlier one stays stale.
+func withoutKeptFiles(dir string, stale []string, files []copyFile) ([]string, error) {
+	var kept []fs.FileInfo
+	for _, f := range files {
+		info, err := os.Stat(f.st.disk)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue // no file stands at the stage's path yet, so no stale file is it
+		} else if err != nil {
+			return nil, err
+		}
+		kept = append(kept, info)
+	}
+	var out []string
+	for _, stage := range stale {
+		info, err := os.Stat(filepath.Join(dir, filepath.FromSlash(stage)+".md"))
+		if err != nil {
+			return nil, err
+		}
+		if !slices.ContainsFunc(kept, func(k fs.FileInfo) bool { return os.SameFile(info, k) }) {
 			out = append(out, stage)
 		}
 	}

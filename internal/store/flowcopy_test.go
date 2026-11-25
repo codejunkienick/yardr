@@ -430,6 +430,9 @@ func TestCopyRepoFlowsOfNamedRepositoryFlows(t *testing.T) {
 // whole copy is refused, naming who, and nothing is written.
 func TestCopyRepoFlowsAfterSwitchingBackReplacesTheEarlierCopy(t *testing.T) {
 	t.Parallel()
+	t.Run("keeps a stage file that differs only by case", func(t *testing.T) {
+		checkCopyRepoFlowsKeepsTheStageFileItWroteOverOneThatDiffersByCase(t)
+	})
 	y := listYard(t)
 	dir := y.dirDepotWith(t, "web", map[string]string{
 		"default.flow": copyDefault, "type/wagon.flow": copyWagon,
@@ -568,6 +571,95 @@ func TestCopyRepoFlowsAfterSwitchingBackReplacesTheEarlierCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 	y.copyRefused(t, "web", "mckean", "flow web.default stands in the store and is the pack starter's, imported into depot web")
+}
+
+// foldsCase says whether the file system of dir takes Probe and probe for one
+// file, as an APFS volume does unless it was made case-sensitive.
+func foldsCase(t *testing.T, dir string) bool {
+	t.Helper()
+	p := filepath.Join(dir, "Probe")
+	if err := os.WriteFile(p, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(p)
+	_, err := os.Stat(filepath.Join(dir, "probe"))
+	switch {
+	case err == nil:
+		return true
+	case errors.Is(err, fs.ErrNotExist):
+		return false
+	default:
+		t.Fatal(err)
+		return false
+	}
+}
+
+// A stage file of the earlier copy that differs from the new copy's only in the
+// case of its name is the new copy's file where the file system folds case in
+// file names: the write puts the new text in the entry that stands, under the
+// name it has, so that entry is not a file the new copy has none for, and the
+// copy neither removes it nor keeps and records a removal of the text it just
+// wrote. Where the file system does not fold, the two are two files, and the
+// earlier one is removed with the rest of its copy. The test probes the
+// directory it runs in and holds the branch that file system takes, so that
+// neither is skipped.
+func checkCopyRepoFlowsKeepsTheStageFileItWroteOverOneThatDiffersByCase(t *testing.T) {
+	t.Parallel()
+	y := listYard(t)
+	folds := foldsCase(t, y.home)
+	const before, after = "Review it.\n", "Review it again.\n"
+	dir := y.dirDepotWith(t, "web", map[string]string{
+		"default.flow":      strings.ReplaceAll(copyDefault, "review", "Review"),
+		"default/Review.md": before,
+	})
+	y.copiedAndUnused(t, "web", nil)
+	// The repository since: the stage is review, with a file of its own text.
+	if err := os.Remove(filepath.Join(dir, RepoFlowDir, "default", "Review.md")); err != nil {
+		t.Fatal(err)
+	}
+	writeFlowFiles(t, dir, map[string]string{"default.flow": copyDefault, "default/review.md": after})
+
+	res, err := y.CopyRepoFlows(y.ctx, "web", "mckean", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Flows) != 1 || !res.Flows[0].Replaced || res.Flows[0].StageFiles != 1 {
+		t.Errorf("the second copy = %+v, want one flow, replaced, of 1 stage file", res.Flows)
+	}
+
+	var names []string
+	ents, err := os.ReadDir(filepath.Join(y.home, "flows", "web.default"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range ents {
+		names = append(names, e.Name())
+	}
+	if folds {
+		// One file stands for the stage, under whichever spelling the earlier copy gave it.
+		if len(names) != 1 || !strings.EqualFold(names[0], "review.md") {
+			t.Errorf("the flow's directory holds %v, want one file for the stage", names)
+		}
+	} else if !slices.Equal(names, []string{"review.md"}) {
+		t.Errorf("the flow's directory holds %v, want review.md alone: Review.md is the earlier copy's, which the new one has no file for", names)
+	}
+	if got, mode := y.homeFile(t, "web.default", "review"); got != after || mode != 0o644 {
+		t.Errorf("the stage file of review holds %q at %v, want %q at rw-r--r--", got, mode, after)
+	}
+	if sf := y.stageOnTheLine(t, "web", "web.default", "review"); sf == nil || sf.Text != after {
+		t.Errorf("the Line carries the stage file of review as %+v, want the new text", sf)
+	}
+
+	// What the copy kept and recorded is what it replaced or removed of the
+	// earlier copy, and never the text it wrote.
+	y.historyHolds(t, before)
+	want := "Review none <- " + sha8(before)
+	if folds {
+		want = "review " + sha8(after) + " <- " + sha8(before)
+	}
+	if got := y.stageWrites(t); !slices.Equal(got, []string{want}) {
+		t.Errorf("the writes recorded\n%q\nwant\n%q", got, []string{want})
+	}
 }
 
 // What a copy may not do it refuses before it has changed anything, in the
