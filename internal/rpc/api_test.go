@@ -1280,7 +1280,7 @@ var apiOperatorCalls = []apiCall{
 			{"flows[].stages[].stage_file.text", "string", "the file whole"},
 			{"flows[].stages[].stage_file.digest", "string", "the SHA-256 of `text` in lower case hex, as `sha256sum` prints it: what a save of the file is held to (`--digest` of `yardr flow set-stage`)"},
 			{"flows[].stages[].stage_file.prior_digest", "string?", "the SHA-256 of the text the latest save of a store flow's stage file replaced, which the yard keeps (`<home>/stage-history/<sha256>`); absent where that save created the file, where the kept text is gone, is not what its name says or is longer than 32 KiB, and on a flow of a depot's repository"},
-			{"flows[].stages[].stage_file.prior_text", "string?", "that text whole, as `yardr flow set-stage -f <home>/stage-history/<sha256>` puts it back; absent where `prior_digest` is"},
+			{"flows[].stages[].stage_file.prior_text", "string?", "that text whole, as `yardr flow set-stage <flow> <stage> -f <home>/stage-history/<sha256>` puts it back; absent where `prior_digest` is"},
 			{"flows[].stages[].stage_file.warning", "string?", "where the file's `## Ask` section is broken, as `<path>: <why>`, which `yardr flow show` warns of too; a save is never refused for it; absent where it is not"},
 			{"crew", "array", "the crew members, each with its prompt where its config names one (as a stage's prompt says it); a member with none carries its name alone"},
 			{"crew[].name", "string", "the crew member"},
