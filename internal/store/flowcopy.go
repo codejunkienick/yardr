@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
@@ -110,8 +111,8 @@ type copyItem struct {
 	replaced bool
 	files    []copyFile
 	// stale are the stage files of a replaced copy that the new copy has no
-	// file for, as paths on disk: they are removed, so that none of the old
-	// copy is read as the new one's.
+	// file for, as the stage names they stand under (strayHomeStageFiles): they
+	// are removed, so that none of the old copy is read as the new one's.
 	stale []string
 	back  string // the command that points the pointer back at the repository
 }
@@ -369,11 +370,15 @@ func (w *wtx) homeFlowDir(flow string) (dir string, stands bool, err error) {
 	return dir, stands, nil
 }
 
-// strayHomeStageFiles lists, as paths on disk, the markdown files under dir
-// (rel is dir's place in the flow's directory, as a stage name has it) that
-// are the stage file of no stage of keep: what is left of an earlier copy once
-// the new one is written. A link met on the way is refused, not followed and
-// not removed: the yard removes a stage file only where a plain file stands.
+// strayHomeStageFiles lists, as the stage names they stand under (the path
+// from the flow's directory without .md; rel is dir's place in it), the
+// markdown files under dir that are the stage file of no stage of keep: what is
+// left of an earlier copy once the new one is written. A link met on the way is
+// refused, not followed and not removed: the yard removes a stage file only
+// where a plain file stands. So is a markdown file whose name no stage can have
+// (stageRel): the text of a file the copy removes is kept first, which
+// standStage reads under a stage's name alone, and a file whose text cannot be
+// kept is not removed, so the copy stops here, before it has written anything.
 func strayHomeStageFiles(dir, rel string, keep map[string]bool) ([]string, error) {
 	ents, err := os.ReadDir(dir)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -394,7 +399,11 @@ func strayHomeStageFiles(dir, rel string, keep map[string]bool) ([]string, error
 			}
 			out = append(out, sub...)
 		case e.Type().IsRegular() && filepath.Ext(e.Name()) == ".md" && !keep[strings.TrimSuffix(name, ".md")]:
-			out = append(out, p)
+			stage := strings.TrimSuffix(name, ".md")
+			if _, err := stageRel(stage); err != nil {
+				return nil, fmt.Errorf("%s has a name no stage can have (each slash-separated part starts with a letter or digit and holds only letters, digits, '.', '_' and '-'), so the yard cannot keep its text before the copy removes it with the files of the copy it replaces: move it out of the flow's directory, or rename it, then copy again", p)
+			}
+			out = append(out, stage)
 		}
 	}
 	return out, nil
@@ -444,7 +453,9 @@ func (w *wtx) copyMarked(depot string) (replaced map[string]bool, retried bool) 
 // looked at, since the first pointer alone would hand a type's beads to the
 // depot's flow (strayBeads skips a type only once its own pointer stands),
 // then the stage files, which only a write that has passed all of that
-// reaches. A retry finds the first attempt's files identical and leaves them.
+// reaches. A retry finds the first attempt's files identical and leaves them,
+// and records what they replaced from what its first attempt noted
+// (stageWriteState.copyPrev).
 func (w *wtx) copyRepoFlows(ctx context.Context, repo *RepoFlows, actor string) (*CopiedFlows, error) {
 	plan, err := w.planCopy(repo)
 	if err != nil {
@@ -496,12 +507,59 @@ func (w *wtx) copyRepoFlows(ctx context.Context, repo *RepoFlows, actor string) 
 	if w.stageWrote != nil {
 		w.stageWrote.key = plan.marker()
 	}
-	for _, it := range plan.items {
-		if err := it.writeFiles(); err != nil {
-			return nil, err
-		}
+	if err := w.writeCopyFiles(plan, actor); err != nil {
+		return nil, err
 	}
 	return out, nil
+}
+
+// writeCopyFiles writes the stage files of every flow of the plan
+// (copyItem.writeFiles), then records each text that a file's write replaced or
+// removed as a save of a stage file does: a flow_set of the stage with the
+// digest of the text that stands now (none for a file removed) and prev_digest,
+// which is where the Line reads the text a stage file had before (stagePrior).
+// They follow the files, since they say what the files did, and go by their
+// "<flow> <stage>" names, so that a retry records what a single run does.
+//
+// A retry finds the files its first attempt wrote on disk already, and so
+// replaces and removes nothing: what they replaced is what that attempt left in
+// w.stageWrote.copyPrev. What each flow's writeFiles answers is added to it
+// whether it went through or failed part way, since the files it did write stay
+// on disk either way. Where w.stageWrote is nil no attempt came before, and the
+// answers are all there is.
+func (w *wtx) writeCopyFiles(plan *copyPlan, actor string) error {
+	prev := map[string]string{}
+	if w.stageWrote != nil {
+		if w.stageWrote.copyPrev != nil {
+			prev = w.stageWrote.copyPrev
+		}
+		w.stageWrote.copyPrev = prev
+	}
+	now := map[string]string{}
+	for _, it := range plan.items {
+		kept, err := it.writeFiles(w.home)
+		for stage, digest := range kept {
+			prev[it.target+" "+stage] = digest
+		}
+		if err != nil {
+			return err
+		}
+		for _, f := range it.files {
+			now[it.target+" "+f.stage] = stageDigest([]byte(f.text))
+		}
+	}
+	for _, key := range slices.Sorted(maps.Keys(prev)) {
+		flow, stage, _ := strings.Cut(key, " ")
+		digest, ok := now[key]
+		if !ok {
+			digest = stageNone // the repository has no file of it: the copy removed it
+		}
+		data := map[string]any{"flow": flow, "stage": stage, "digest": digest, "prev_digest": prev[key]}
+		if err := w.event("", "flow_set", actor, data); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // writeFiles puts the copy's stage files on disk, each whole or not at all
@@ -509,20 +567,50 @@ func (w *wtx) copyRepoFlows(ctx context.Context, repo *RepoFlows, actor string) 
 // at, and leaves a file that holds the text already as it is. The files of an
 // earlier copy that the new one has none for are removed after, so that a
 // reader never meets a gap where both have a file.
-func (it copyItem) writeFiles() error {
+//
+// The text of a file it writes over or removes is kept first, in the home's
+// stage history (stageStand.keep), as the save of a stage file keeps what it
+// replaces: an earlier copy that was left unused may hold a save that is in no
+// repository. A file whose text cannot be kept is neither written over nor
+// removed, and the copy stops there. It answers the digest of the text each
+// file it wrote over or removed held, by the stage, and where it stops with an
+// error those of the files it had done by then. A file that stood as none (no
+// file, or one with nothing in it) leaves nothing to keep and nothing in the
+// answer.
+func (it copyItem) writeFiles(home string) (map[string]string, error) {
+	kept := map[string]string{}
 	for _, f := range it.files {
 		if f.st.digest == stageDigest([]byte(f.text)) {
 			continue
 		}
+		prev, _, err := f.st.keep([]byte(f.text))
+		if err != nil {
+			return kept, fmt.Errorf("stage file of %s in flow %s: keep the text it replaces: %w", f.stage, it.target, err)
+		}
 		f.st.mode = 0o644
 		if err := f.st.write(f.text); err != nil {
-			return fmt.Errorf("stage file of %s in flow %s: %w", f.stage, it.target, err)
+			return kept, fmt.Errorf("stage file of %s in flow %s: %w", f.stage, it.target, err)
+		}
+		if prev != "" {
+			kept[f.stage] = prev
 		}
 	}
-	for _, p := range it.stale {
-		if err := os.Remove(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return fmt.Errorf("flow %s: removing the stage file %s of the copy it replaces: %w", it.target, p, err)
+	for _, stage := range it.stale {
+		// Read as it stands now, a link met since the plan refused as well.
+		st, err := standStage(home, it.target, stage)
+		if err != nil {
+			return kept, err
+		}
+		prev, _, err := st.keep(nil)
+		if err != nil {
+			return kept, fmt.Errorf("stage file of %s in flow %s: keep the text it removes: %w", stage, it.target, err)
+		}
+		if err := os.Remove(st.disk); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return kept, fmt.Errorf("flow %s: removing the stage file %s of the copy it replaces: %w", it.target, st.path, err)
+		}
+		if prev != "" {
+			kept[stage] = prev
 		}
 	}
-	return nil
+	return kept, nil
 }

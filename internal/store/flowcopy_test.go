@@ -93,8 +93,9 @@ func (y *askYard) homeFile(t *testing.T, flow, stage string) (string, os.FileMod
 
 // copyState is what a copy may change, as one string: the store's flows
 // and pointers, the files and directories under the home's flows with what
-// they hold, and how many flow events there are. A refused copy leaves it as
-// it found it.
+// they hold, the texts the stage history keeps, how many flow events there are
+// and what the ones that name a stage say. A refused copy leaves it as it
+// found it, and a copy that ran twice leaves what one that ran once does.
 func (y *askYard) copyState(t *testing.T) string {
 	t.Helper()
 	var b strings.Builder
@@ -130,6 +131,10 @@ func (y *askYard) copyState(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
+	for _, name := range y.historyNames(t) {
+		raw, err := os.ReadFile(filepath.Join(StageHistoryDir(y.home), name))
+		fmt.Fprintf(&b, "history %.8s %q %v\n", name, raw, err)
+	}
 	for _, kind := range []string{"flow_set", "flow_pointer_set"} {
 		evs, err := y.EventsOfKind(y.ctx, kind, 200)
 		if err != nil {
@@ -137,7 +142,52 @@ func (y *askYard) copyState(t *testing.T) string {
 		}
 		fmt.Fprintf(&b, "%s %d\n", kind, len(evs))
 	}
+	for _, e := range y.stageEvents(t) {
+		fmt.Fprintf(&b, "stage %v %v %.8v <- %.8v\n", e.Data["flow"], e.Data["stage"], e.Data["digest"], e.Data["prev_digest"])
+	}
 	return b.String()
+}
+
+// stageOnTheLine is the stage file of stage in the store flow flow as the Line
+// of depot carries it, nil where it says none.
+func (y *askYard) stageOnTheLine(t *testing.T, depot, flow, stage string) *LineStageFile {
+	t.Helper()
+	l, err := y.Line(y.ctx, depot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range l.Flows {
+		for _, s := range f.Stages {
+			if f.Name == flow && s.Stage == stage {
+				return s.StageFile
+			}
+		}
+	}
+	t.Fatalf("the Line of %s has no stage %s of the flow %s", depot, stage, flow)
+	return nil
+}
+
+// copiedAndUnused copies the flows of depot and points the depot back at its
+// repository, so that nothing follows the copy: the leftover that a later copy
+// replaces. The stage files of files (by stage) are then put over it as plain
+// files, as an edit or a file of an earlier copy would stand.
+func (y *askYard) copiedAndUnused(t *testing.T, depot string, files map[string]string) {
+	t.Helper()
+	if _, err := y.CopyRepoFlows(y.ctx, depot, "mckean", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := y.SetFlowPointer(y.ctx, depot, "", "", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	for stage, text := range files {
+		p := filepath.Join(y.home, "flows", depot+".default", filepath.FromSlash(stage)+".md")
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 // refuses holds the copy of depot, asked as actor, to a refusal that says
@@ -372,7 +422,10 @@ func TestCopyRepoFlowsOfNamedRepositoryFlows(t *testing.T) {
 // the copy, in the store and in the home, unused; copying again replaces it:
 // the flow as the repository has it now, its stage files written over, and
 // the files of the old copy that the new one has none for gone, a file that
-// is no stage file left alone. A copy that is followed, by a depot's
+// is no stage file left alone. The text of each stage file it writes over or
+// removes is kept in the stage history first, a save of the old copy's that
+// is in no repository among it, and recorded as the flow_set of its stage that
+// the Line's prior text is read from. A copy that is followed, by a depot's
 // pointer or an open bead's pin, or that a pack manages, is no leftover: the
 // whole copy is refused, naming who, and nothing is written.
 func TestCopyRepoFlowsAfterSwitchingBackReplacesTheEarlierCopy(t *testing.T) {
@@ -404,6 +457,12 @@ func TestCopyRepoFlowsAfterSwitchingBackReplacesTheEarlierCopy(t *testing.T) {
 	if _, err := y.GetFlow(y.ctx, "web.default"); err != nil {
 		t.Errorf("going back removed the copy: %v", err)
 	}
+	// An edit of a stage of the earlier copy: the text now standing is in no
+	// repository.
+	const edited = "Build it my way.\n"
+	if _, err := y.PutStageFile(y.ctx, "web.default", "new", edited, "", "mckean", true); err != nil {
+		t.Fatal(err)
+	}
 	// What the earlier copy holds beside the repository's files, and the
 	// repository since: another stage, new text, a stage file gone.
 	home := filepath.Join(y.home, "flows", "web.default")
@@ -423,7 +482,9 @@ func TestCopyRepoFlowsAfterSwitchingBackReplacesTheEarlierCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, err := y.CopyRepoFlows(y.ctx, "web", "mckean", true)
+	// Made through a device: what it writes is marked with it, the events of the
+	// stage files it replaces and removes among them.
+	res, err := y.CopyRepoFlows(WithVia(y.ctx, "mckean", "phone via edge"), "web", "mckean", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -440,6 +501,42 @@ func TestCopyRepoFlowsAfterSwitchingBackReplacesTheEarlierCopy(t *testing.T) {
 	}
 	if raw, err := os.ReadFile(filepath.Join(home, "notes.txt")); err != nil || string(raw) != "Mine.\n" {
 		t.Errorf("notes.txt, no stage file, holds %q, %v: the copy left it alone", raw, err)
+	}
+
+	// Every text the copy wrote over or removed is kept: the edit above, the
+	// stage the repository has no file for now and the two files the copy took
+	// away, with the text the edit replaced, and no other (the files that held
+	// what the repository says were left, and kept nothing).
+	y.historyIs(t, edited)
+	y.historyHolds(t, "Build it.\n", edited, "Review it.\n", "Old.\n", "Old qa.\n")
+	// Each is recorded as the flow_set of its stage, in the order of the names:
+	// the digest that stands now, none for the files taken away, and the one
+	// replaced.
+	if want := []string{
+		"new " + sha8(edited) + " <- " + sha8("Build it.\n"),
+		"new " + sha8("Build it again.\n") + " <- " + sha8(edited),
+		"qa/old none <- " + sha8("Old qa.\n"),
+		"review none <- " + sha8("Review it.\n"),
+		"stale none <- " + sha8("Old.\n"),
+	}; !slices.Equal(y.stageWrites(t), want) {
+		t.Errorf("the writes recorded\n%q\nwant\n%q", y.stageWrites(t), want)
+	}
+	for i, e := range y.stageEvents(t) {
+		want := "phone via edge" // the first is the save above, which no device made
+		if i == 0 {
+			want = ""
+		}
+		if got := Via(e); got != want {
+			t.Errorf("the flow_set of the stage %v is marked via %q, want %q", e.Data["stage"], got, want)
+		}
+	}
+	// So the Line's prior text of the stage is the edit the copy replaced, which
+	// one more save puts back, and not the text from before it.
+	if sf := y.stageOnTheLine(t, "web", "web.default", "new"); sf == nil || sf.Text != "Build it again.\n" || sf.PriorDigest != sha256Hex(edited) || sf.PriorText != edited {
+		t.Errorf("the Line carries the stage file of new as %+v, want the copy's text and the edit as its prior text", sf)
+	}
+	if sf := y.stageOnTheLine(t, "web", "web.default", "review"); sf != nil {
+		t.Errorf("the Line carries %+v for the stage the copy has no file for", sf)
 	}
 
 	// In use: the whole copy is refused while any of its flows is, and the
@@ -476,8 +573,10 @@ func TestCopyRepoFlowsAfterSwitchingBackReplacesTheEarlierCopy(t *testing.T) {
 // What a copy may not do it refuses before it has changed anything, in the
 // store or on disk: a depot that is none or has nothing to copy, a governing
 // file that does not parse (one a depot's pointer stands in front of is read
-// by nobody, and neither is it copied), two files to one name, and a link or
-// a file where the copy would write or remove.
+// by nobody, and neither is it copied), two files to one name, a link or a
+// file where the copy would write or remove, a file it would remove whose text
+// the yard cannot keep for its name, and a text it cannot keep of a file it
+// would write over or remove.
 func TestCopyRepoFlowsRefusals(t *testing.T) {
 	t.Parallel()
 	flows := map[string]string{"default.flow": copyDefault, "default/new.md": "Build it.\n"}
@@ -544,7 +643,30 @@ func TestCopyRepoFlowsRefusals(t *testing.T) {
 			if err := os.Symlink(elsewhere(t), filepath.Join(y.home, "flows", "web.default", "old.md")); err != nil {
 				t.Fatal(err)
 			}
+			// A file the copy would write over, and so would keep the text of, if
+			// it went as far: the refusal comes before either (copyRefused sees
+			// the file and the stage history as they were).
+			if err := os.WriteFile(filepath.Join(y.home, "flows", "web.default", "new.md"), []byte("Edited.\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
 		}, want: "web.default/old.md is a symbolic link: the yard removes a stage file only where a plain file stands"},
+		{name: "a markdown file of the copy it replaces that no stage can be named after", depot: "web", files: flows, setup: func(t *testing.T, y *askYard) {
+			// The copy would remove it with the rest of the leftover, and the yard
+			// keeps the text of a stage file under a stage's name alone: so it is
+			// refused, before it keeps or writes over the edited file beside it
+			// (copyRefused sees the file and the stage history as they were).
+			y.copiedAndUnused(t, "web", map[string]string{"new": "Edited.\n", "my notes": "Mine.\n"})
+		}, want: "web.default/my notes.md has a name no stage can have"},
+		{name: "a text it cannot keep of a file it would write over", depot: "web", files: flows, setup: func(t *testing.T, y *askYard) {
+			y.copiedAndUnused(t, "web", map[string]string{"new": "Edited.\n"})
+			// What the digest of the text names holds other text, as a kept text
+			// that was changed since would.
+			writeHistory(t, StageHistoryDir(y.home), sha256Hex("Edited.\n"), "Else.\n")
+		}, want: "stage file of new in flow web.default: keep the text it replaces: "},
+		{name: "a text it cannot keep of a file it would remove", depot: "web", files: flows, setup: func(t *testing.T, y *askYard) {
+			y.copiedAndUnused(t, "web", map[string]string{"old": "Old.\n"})
+			writeHistory(t, StageHistoryDir(y.home), sha256Hex("Old.\n"), "Else.\n")
+		}, want: "stage file of old in flow web.default: keep the text it removes: "},
 		{name: "a file where the flows directory goes", depot: "web", files: flows, setup: func(t *testing.T, y *askYard) {
 			if err := os.WriteFile(filepath.Join(y.home, "flows"), []byte("a file\n"), 0o644); err != nil {
 				t.Fatal(err)
@@ -646,7 +768,9 @@ func TestCopyRepoFlowsIsTheOperatorsAlone(t *testing.T) {
 // disk when its transaction is rolled back: the retry finds them, leaves what
 // it would write, answers what the first run would have (a copy of a flow
 // that replaced nothing does not turn into one that did), and ends in the
-// state a write that ran once would.
+// state a write that ran once would: the texts it kept and the flow_set events
+// of the stage files it replaced or removed, which the retry no longer sees on
+// disk, are the first run's.
 func TestCopyRepoFlowsRunTwiceEndsTheSame(t *testing.T) {
 	t.Parallel()
 	files := map[string]string{
@@ -654,7 +778,8 @@ func TestCopyRepoFlowsRunTwiceEndsTheSame(t *testing.T) {
 		"default/new.md": "Build it.\n", "type/wagon/ride.md": "Ride it.\n",
 	}
 	// yard is a yard with the depot web, in the state a copy starts from: with
-	// the leftover of an earlier copy where replacing says so.
+	// the leftover of an earlier copy where replacing says so, a stage of it
+	// edited and a file of it that the new copy has none for.
 	yard := func(t *testing.T, replacing bool) *askYard {
 		y := listYard(t)
 		y.dirDepotWith(t, "web", files)
@@ -667,11 +792,28 @@ func TestCopyRepoFlowsRunTwiceEndsTheSame(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			for _, e := range [][3]string{{"web.default", "new", "Build it my way.\n"}, {"web.wagon", "ride", "Ride my way.\n"}} {
+				if _, err := y.PutStageFile(y.ctx, e[0], e[1], e[2], "", "mckean", true); err != nil {
+					t.Fatal(err)
+				}
+			}
 			if err := os.WriteFile(filepath.Join(y.home, "flows", "web.default", "stale.md"), []byte("Old.\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
 		}
 		return y
+	}
+	// What a copy over that leftover keeps, and the writes that were recorded
+	// by the end of it: the two saves of yard, then the copy's own, which go by
+	// the names of the files, and none for the file that held what the
+	// repository says.
+	replacedTexts := []string{"Build it.\n", "Build it my way.\n", "Ride it.\n", "Ride my way.\n", "Old.\n"}
+	replacingWrites := []string{
+		"new " + sha8("Build it my way.\n") + " <- " + sha8("Build it.\n"),
+		"ride " + sha8("Ride my way.\n") + " <- " + sha8("Ride it.\n"),
+		"new " + sha8("Build it.\n") + " <- " + sha8("Build it my way.\n"),
+		"stale none <- " + sha8("Old.\n"),
+		"ride " + sha8("Ride it.\n") + " <- " + sha8("Ride my way.\n"),
 	}
 	for _, replacing := range []bool{false, true} {
 		t.Run(fmt.Sprintf("replacing=%v", replacing), func(t *testing.T) {
@@ -713,8 +855,66 @@ func TestCopyRepoFlowsRunTwiceEndsTheSame(t *testing.T) {
 			if a, b := y.copyState(t), once.copyState(t); a != b {
 				t.Errorf("the retried copy left\n%s\nwhere a copy that ran once leaves\n%s", a, b)
 			}
+			// What the two are equal in is not nothing: a copy that replaces
+			// something kept the text it replaced, and recorded each, once.
+			var want []string
+			if replacing {
+				y.historyHolds(t, replacedTexts...)
+				want = replacingWrites
+			} else {
+				y.historyHolds(t)
+			}
+			if got := y.stageWrites(t); !slices.Equal(got, want) {
+				t.Errorf("the retried copy recorded the writes\n%q\nwant\n%q", got, want)
+			}
 		})
 	}
+
+	// A first run that stops part way has written the files before the one it
+	// stopped at, in the same flow or in the one before. Its retry goes through
+	// and records those too, and what they replaced is in the note the first run
+	// left, not on disk.
+	t.Run("the first run stops at a text it cannot keep", func(t *testing.T) {
+		t.Parallel()
+		once := yard(t, true)
+		if _, err := once.CopyRepoFlows(once.ctx, "web", "mckean", true); err != nil {
+			t.Fatal(err)
+		}
+		y := yard(t, true)
+		repo, err := y.RepoFlows(y.ctx, "web")
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The text of the file the copy removes is named where another text
+		// stands: the copy has written over the stage file of new by then, and
+		// stops before the second flow's.
+		writeHistory(t, StageHistoryDir(y.home), sha256Hex("Old.\n"), "Else.\n")
+		runs := 0
+		var first error
+		err = y.write(func(w *wtx) error {
+			runs++
+			if runs == 2 {
+				if err := os.Remove(y.historyPath("Old.\n")); err != nil {
+					return err
+				}
+			}
+			_, err := w.copyRepoFlows(y.ctx, repo, "mckean")
+			if runs == 1 {
+				first = err
+			}
+			return err
+		})
+		if err != nil || runs != 2 || first == nil || !strings.Contains(first.Error(), "stage file of stale in flow web.default: keep the text it removes") {
+			t.Fatalf("the write ran %d times, the first ending %v, and ended %v, want 2 runs, the first stopped at the text of stale, and nil", runs, first, err)
+		}
+		if a, b := y.copyState(t), once.copyState(t); a != b {
+			t.Errorf("the copy that was retried after it stopped left\n%s\nwhere a copy that ran once leaves\n%s", a, b)
+		}
+		y.historyHolds(t, replacedTexts...)
+		if got := y.stageWrites(t); !slices.Equal(got, replacingWrites) {
+			t.Errorf("the retried copy recorded the writes\n%q\nwant\n%q", got, replacingWrites)
+		}
+	})
 }
 
 // copyAsk is the ask of flow copy-repo with the words after the command's own.
@@ -800,12 +1000,31 @@ func TestRunAskFlowCopyRepoCardsTheCopy(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	again := y.asked(t, y.ask(t, copyAsk("web"), "yardmaster")).Ask.Run
+	againSeq := y.ask(t, copyAsk("web"), "yardmaster")
+	again := y.asked(t, againSeq).Ask.Run
 	strongHas(t, again.Does,
 		".yardr/flows/default.flow becomes the store flow web.default",
 		"A store flow of that name stands in no use, the leftover of an earlier copy: it is replaced whole, and so are its stage files, any of which the repository has no file for being removed.",
 		".yardr/flows/type/wagon.flow becomes the store flow web.wagon",
 		"A store flow of that name stands in no use")
+
+	// Approved over an edit of the leftover that is in no repository, that card
+	// keeps the text it writes over, as the copy of the terminal does, and the
+	// Line's prior text of the stage is that edit.
+	const edited = "Build it my way.\n"
+	if _, err := y.PutStageFile(y.ctx, "web.default", "new", edited, "", "mckean", true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.ApproveAsk(y.ctx, y.bead, againSeq, "mckean", true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := y.homeFile(t, "web.default", "new"); got != "Build it.\n" {
+		t.Errorf("the approval left the stage file of new holding %q, want the repository's text", got)
+	}
+	y.historyHolds(t, "Build it.\n", edited)
+	if sf := y.stageOnTheLine(t, "web", "web.default", "new"); sf == nil || sf.PriorText != edited {
+		t.Errorf("the Line carries the stage file of new as %+v, want the edit as its prior text", sf)
+	}
 }
 
 // A card for a depot of named pointers says what each pointer led to, keeps

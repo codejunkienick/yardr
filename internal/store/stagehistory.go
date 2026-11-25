@@ -60,12 +60,17 @@ type stageWriteState struct {
 	// key names what a run of the write has written, "" before one has: "stage
 	// <flow> <stage>" for a stage file, or the marker of a copy of repository
 	// flows (copyRepoFlows), which begins "copy-repo " so that neither kind of
-	// write takes the other's for its own. A copy leaves nothing in the fields
-	// below.
+	// write takes the other's for its own. A stage file's write leaves its
+	// file in prevDigest and prevText, and a copy leaves its files in copyPrev.
 	key string
 	// prevDigest and prevText are the file that run replaced, "" where it
 	// created the file or replaced one with nothing in it.
 	prevDigest, prevText string
+	// copyPrev is what a copy's run replaced or removed, as the digest of the
+	// text each file held, by "<flow> <stage>" (neither name holds a space): a
+	// copy writes many files where a stage file's write writes one, and its
+	// retry finds them written already.
+	copyPrev map[string]string
 }
 
 // openStageHistory opens the kept text at path for reading, without following
@@ -224,11 +229,12 @@ func readStageHistory(home, digest string) (string, bool) {
 // replaced, with its digest, as the Line carries it for the file whose digest
 // is digest: the prev_digest of the latest flow_set of that stage that has
 // one, unless it names the text that stands (a file put back by hand, which
-// has nothing before it to offer), and the text the history keeps under it.
-// A save that created the file or changed nothing has none, and does not
-// hide the one before it. Both are "" where the event is gone (the log is
-// pruned), or the text is not kept or is not what its name says: the read
-// does without them.
+// has nothing before it to offer), and the text the history keeps under it. A
+// copy of a depot's repository flows records the same event for a stage file
+// it writes over or removes, so its text is the prior as a save's is. A save
+// that created the file or changed nothing has none, and does not hide the one
+// before it. Both are "" where the event is gone (the log is pruned), or the
+// text is not kept or is not what its name says: the read does without them.
 func (s *Store) stagePrior(flow, stage, digest string) (prevDigest, prevText string) {
 	var prev string
 	err := s.read(func(tx *bolt.Tx) error {

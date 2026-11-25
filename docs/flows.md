@@ -200,10 +200,20 @@ it has, and so is one whose governing file does not parse.
   earlier copy that was pointed back, and is replaced: the flow as the
   repository has it now, its stage files written over, and the files of the old
   copy that the new one has no file for removed (a file that is no markdown is
-  left). The output says `replacing an unused earlier copy`. One that a pointer
-  of any depot or type, or an open bead's pin, follows, or that a pack manages,
-  is not replaced: the whole copy is refused, naming who follows it, and
-  nothing is written, in the store or on disk.
+  left). The output says `replacing an unused earlier copy`. The text of each
+  stage file it writes over or removes is kept first, in
+  `<home>/stage-history/<sha256>`, as [a save keeps
+  its own](#stage-files-what-a-stage-is-for): an edit made to the earlier copy
+  with `flow set-stage`, which is in no repository, can be put back with
+  `flow set-stage <flow> <stage> -f <file>`. A text the copy cannot keep stops
+  it, with that file as it was. A markdown file among the old copy's files whose
+  name no stage can have (one with a space in it, say), which the copy would
+  remove and could not keep the text of, refuses the whole copy, naming the
+  file, and nothing is written: move the file out of the flow's directory, or
+  rename it, and copy again. One that a pointer of any depot or type, or an
+  open bead's pin, follows, or that a pack manages, is not replaced: the whole
+  copy is refused, naming who follows it, and nothing is written, in the store
+  or on disk.
 
 Only the operator copies, as only the operator writes a stage file (`flow
 set-stage`): the store refuses a crew member or a user, who propose it as a
@@ -222,8 +232,12 @@ targets as they stood: a commit that landed, a pointer set or a leftover copy
 that appeared since is refused as stale, and a store flow of a copy's name that
 a depot, a type or a pin follows since is refused in the card's own words, with
 nothing written. The copy is recorded as `flow_set` for each flow and
-`flow_pointer_set` for each pointer, and `--json` prints the store's answer
-(`depot`, `source`, `flows`, `kept`) alone.
+`flow_pointer_set` for each pointer, and as a `flow_set` of the stage, with its
+`digest` (`none` for a file removed) and `prev_digest`, for each stage file it
+writes over or removes, as a save of the file is recorded, so that the
+[`Line`](api.md#line) carries the text the copy replaced as the stage file's
+`prior_text`. `--json` prints the store's answer (`depot`, `source`, `flows`,
+`kept`) alone.
 
 ## A base change that drops a stage
 
@@ -650,7 +664,10 @@ or `stage-history` is a symbolic link or no directory. Nothing prunes the
 directory (`yardr store prune` sweeps `blobs/` alone), so a kept text stays
 until its file is removed. An import of a pack that writes a stage file over
 a text that stands keeps it the same way ([A pack is a starting
-point](packs.md#yardr-pack-apply)). Saving a kept file puts its text back:
+point](packs.md#yardr-pack-apply)), and so does a `flow copy-repo` that writes
+over a stage file or removes one of the earlier copy it replaces
+([Copying again](#copying-a-repositorys-flows-into-the-store)). Saving a kept
+file puts its text back:
 
 ```
 yardr flow set-stage code review -f <home>/stage-history/<sha256>

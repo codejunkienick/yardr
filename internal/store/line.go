@@ -80,8 +80,9 @@ type LineStageFile struct {
 	// what a save's expectDigest (yardr flow set-stage --digest) holds it to.
 	Digest string `json:"digest,omitempty"`
 	// PriorDigest and PriorText are the text the latest save of a store flow's
-	// stage file replaced, which the yard keeps (StageHistoryDir) so that the
-	// save can be undone by one more; absent where that save created the file,
+	// stage file replaced (a copy of a depot's repository flows that wrote over
+	// the file counts as one), which the yard keeps (StageHistoryDir) so that
+	// the save can be undone by one more; absent where that save created the file,
 	// the kept text is gone, is not what its name says or is longer than a
 	// card carries (MaxRunFlow), and on a flow of a depot's repository.
 	PriorDigest string `json:"prior_digest,omitempty"`
