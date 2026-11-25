@@ -852,7 +852,7 @@ func printHookDelivery(w io.Writer, e store.Event, member, home string, files []
 	}
 	fmt.Fprintf(w, "%6d %s  hook (%s) %s", e.Seq, e.At.Local().Format("01-02 15:04"), or(store.Reason(e, member), "-"), what)
 	if t := str("text"); t != "" {
-		fmt.Fprintf(w, ": %s", printable(t))
+		fmt.Fprintf(w, ": %s%s", printable(t), hookCutSuffix(e.Seq, t))
 	}
 	if u := str("url"); u != "" {
 		fmt.Fprintf(w, "  %s", printable(u))

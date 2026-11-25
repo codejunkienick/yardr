@@ -254,6 +254,11 @@ func TestClaimIdentityPickWritesIdentity(t *testing.T) {
 	if err := y.AnswerAskExpected(y.ctx, open.Bead, open.Ask, open.Turn, pick, "", "mckean", true, open.Identity.Held); !errors.Is(err, ErrConflict) {
 		t.Fatalf("the operator's guarded pick from the same stale read = %v, want a conflict", err)
 	}
+	// Only the yard names what a pick released: an answer that arrives naming
+	// events is refused whoever sends it, and the card stays open.
+	if err := y.AddAnswer(y.ctx, open.Bead, Answer{Ask: open.Ask, Option: pick, Delivered: []uint64{9}}, "mckean"); err == nil || !strings.Contains(err.Error(), "released deliveries are recorded by the yard alone") {
+		t.Fatalf("a pick that names the events it released = %v, want it refused", err)
+	}
 	wantCardOpen(t, y, open.Bead)
 	if err := y.AnswerAsk(y.ctx, open.Bead, open.Ask, pick, "", "mckean", true); err != nil {
 		t.Fatal(err)
@@ -482,6 +487,7 @@ func TestClaimIdentitySomeoneNew(t *testing.T) {
 	if payload, err := y.HookPayload(y.ctx, held[0].Seq); err != nil || string(payload) != "someone new body" {
 		t.Fatalf("released payload = %q, %v", payload, err)
 	}
+	wantDelivered(t, y, open.Bead, []uint64{held[0].Seq})
 	if created, err := y.ClaimIdentity(y.ctx, "talk", "U999", "C1", "again"); err != nil || created {
 		t.Fatalf("a card for a mapped sender = %v, %v", created, err)
 	}
@@ -515,7 +521,7 @@ func TestClaimIdentityNobodyIgnores(t *testing.T) {
 	if got := cardHeldCount(t, y, open.Bead); got != 0 {
 		t.Fatalf("ignored card holds %d messages, want none", got)
 	}
-	wantDecided(t, y, open.Bead, "answered")
+	wantDelivered(t, y, open.Bead, nil)
 	if created, err := y.ClaimIdentity(y.ctx, "talk", "U999", "C1", "again"); err != nil || created {
 		t.Fatalf("a card for an ignored sender = %v, %v", created, err)
 	}
@@ -618,6 +624,9 @@ func TestClaimIdentityLetInOnceClosesCard(t *testing.T) {
 	if d := wantDecided(t, y, first.Bead, "answered"); d.OptionLabel != MappingLetIn {
 		t.Fatalf("the card's answer = %+v, want the %q pick", d, MappingLetIn)
 	}
+	// The answer names the events it released, in arrival order, for a client
+	// to open each whole.
+	wantDelivered(t, y, first.Bead, []uint64{held[0].Seq, held[1].Seq})
 	wantCardClosed(t, y, first.Bead, "let in once by mckean")
 	if got := cardHeldCount(t, y, first.Bead); got != 0 {
 		t.Fatalf("let-in card holds %d messages, want none", got)
@@ -642,6 +651,10 @@ func TestClaimIdentityLetInOnceClosesCard(t *testing.T) {
 	if got, want := hookSpeakers(t, y), []string{SpeakerOutside, SpeakerOutside, "ada"}; !slices.Equal(got, want) {
 		t.Fatalf("hook speakers after the fresh card's pick = %v, want %v", got, want)
 	}
+	// A pick that maps the sender names what it released too, and the let-in
+	// card's answer keeps its own.
+	wantDelivered(t, y, fresh.Bead, hookSeqs(t, y)[2:])
+	wantDelivered(t, y, first.Bead, hookSeqs(t, y)[:2])
 	wantCardClosed(t, y, fresh.Bead, "U999 is ada in talk")
 	// A delivery held between the read and a guarded let-in pick refuses
 	// it: the card holds another count than the caller read, so nothing
@@ -694,7 +707,8 @@ func TestClaimIdentityLetInBeforeChangeStillAnswers(t *testing.T) {
 		if _, err := w.addNoted(row, NoteAnswer, string(text), "mckean"); err != nil {
 			return err
 		}
-		return w.deliverHeld(row.UUID, SpeakerOutside)
+		_, err = w.deliverHeld(row.UUID, SpeakerOutside)
+		return err
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -835,8 +849,8 @@ func TestMappingByHandEndsTheCard(t *testing.T) {
 	if got := cardHeldCount(t, y, card.Bead); got != 0 {
 		t.Fatalf("mapped card holds %d messages, want none", got)
 	}
-	if d := wantDecided(t, y, card.Bead, "taken back"); d.By != stageAskAuthor || d.Words != "U777 is bo in talk" {
-		t.Fatalf("the card's ask ended as %+v, want taken back by the yard with the mapping as the reason", d)
+	if d := wantDecided(t, y, card.Bead, "taken back"); d.By != stageAskAuthor || d.Words != "U777 is bo in talk" || len(d.Delivered) != 0 {
+		t.Fatalf("the card's ask ended as %+v, want taken back by the yard with the mapping as the reason, naming no delivery: nobody answered it", d)
 	}
 	// A key names the sender in any case.
 	if err := y.SetIdentity(y.ctx, "ada", "talk", Identity{Key: "dana"}, "mckean"); err != nil {
@@ -1031,6 +1045,104 @@ func holdTalk(t *testing.T, y *askYard, sender, body string) OpenAsk {
 	}
 	t.Fatalf("no card for %s after a hold", sender)
 	return OpenAsk{}
+}
+
+// hookSeqs are the seqs of the hook events of the yard, in order.
+func hookSeqs(t *testing.T, y *askYard) []uint64 {
+	t.Helper()
+	evs, err := y.Events(y.ctx, "", 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []uint64
+	for _, e := range evs {
+		if e.Kind == "hook" {
+			out = append(out, e.Seq)
+		}
+	}
+	return out
+}
+
+// wantDelivered checks that the card's answer names the hook events it
+// released, in the operator's decided list and in the card's bead view alike.
+func wantDelivered(t *testing.T, y *askYard, bead string, want []uint64) {
+	t.Helper()
+	d := wantDecided(t, y, bead, "answered")
+	view, err := y.Bead(y.ctx, bead)
+	if err != nil || len(view.Asks) != 1 {
+		t.Fatalf("card %s view = %+v, %v", bead, view, err)
+	}
+	if !slices.Equal(d.Delivered, want) || !slices.Equal(view.Asks[0].Delivered, want) {
+		t.Fatalf("card %s released %v by the decided list and %v by its bead view, want %v", bead, d.Delivered, view.Asks[0].Delivered, want)
+	}
+}
+
+// The messages a card holds are read by the person it asks while it is open
+// or put aside, whole and in arrival order, and by no one else; the card's
+// bead and the queue, which agents read before the person picks, carry none of
+// their bytes in either state, nor once the pick has delivered them as events,
+// which the answer names by seq alone. Once answered, the card is read no more.
+func TestIdentityHeldPayloadsReadsOpenAndPutAsideCards(t *testing.T) {
+	t.Parallel()
+	y := mappingYard(t)
+	bodies := []string{`{"text":"HELD-ONE secret plans"}`, `{"text":"HELD-TWO more plans"}`}
+	card := holdTalk(t, y, "U999", bodies[0])
+	holdTalk(t, y, "U999", bodies[1])
+	read := func(actor string) ([]string, error) {
+		return y.IdentityHeldPayloads(y.ctx, card.Bead, card.Ask, actor)
+	}
+	noLeak := func(when string) {
+		t.Helper()
+		view, err := y.Bead(y.ctx, card.Bead)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, err := json.Marshal(struct {
+			Bead  *BeadView
+			Queue *AskQueue
+		}{view, mappingQueue(t, y)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, marker := range []string{"HELD-ONE", "HELD-TWO", "secret plans"} {
+			if strings.Contains(string(raw), marker) {
+				t.Errorf("%s: the card's bead view and the queue hold %q: %s", when, marker, raw)
+			}
+		}
+	}
+	for _, state := range []string{"open", "put aside"} {
+		if state == "put aside" {
+			if err := y.DeferAsk(y.ctx, card.Bead, card.Ask, "mckean"); err != nil {
+				t.Fatal(err)
+			}
+			wantDecided(t, y, card.Bead, "put aside")
+		}
+		if got, err := read("mckean"); err != nil || !slices.Equal(got, bodies) {
+			t.Fatalf("the operator reads %q, %v from the card %s, want %q", got, err, state, bodies)
+		}
+		for _, other := range []string{"ada", "someone-else"} {
+			if got, err := read(other); err == nil || len(got) != 0 {
+				t.Errorf("%s read %q, %v from the card %s", other, got, err, state)
+			}
+		}
+		noLeak(state)
+	}
+	// The put-aside card is picked as an open one is: its messages become
+	// events, named by the answer, and are read from the card no more.
+	if err := y.AnswerAsk(y.ctx, card.Bead, card.Ask, pickFor(t, y, card.Bead, MappingLetIn), "", "mckean", false); err != nil {
+		t.Fatal(err)
+	}
+	seqs := hookSeqs(t, y)
+	wantDelivered(t, y, card.Bead, seqs)
+	for i, want := range bodies {
+		if got, err := y.HookPayload(y.ctx, seqs[i]); err != nil || string(got) != want {
+			t.Errorf("event %d holds %q, %v, want the held body %q", seqs[i], got, err, want)
+		}
+	}
+	if got, err := read("mckean"); !errors.Is(err, ErrNotFound) || len(got) != 0 {
+		t.Errorf("the operator read %q, %v from the answered card, want it not found", got, err)
+	}
+	noLeak("answered")
 }
 
 func hookSpeakers(t *testing.T, y *askYard) []string {

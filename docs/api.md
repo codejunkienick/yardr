@@ -337,7 +337,7 @@ Mail was queued for one of a linked yard: the conversation with `<data.to>@<data
 
 ```json
 {
-  "seq": 200,
+  "seq": 207,
   "kind": "mail",
   "actor": "jo",
   "data": {
@@ -365,7 +365,7 @@ A user or a crew member acknowledged its mail: either everything through `data.t
 
 ```json
 {
-  "seq": 202,
+  "seq": 209,
   "kind": "mail_read",
   "data": {
     "reader": "jo",
@@ -388,13 +388,13 @@ A crew member acknowledged its inbox through at least one non-mail delivery, suc
 
 ```json
 {
-  "seq": 296,
+  "seq": 305,
   "kind": "inbox_read",
   "actor": "signalman",
   "data": {
     "reader": "signalman",
     "session": "",
-    "through": 294
+    "through": 303
   },
   "at": "2026-10-08T09:30:00Z"
 }
@@ -416,13 +416,13 @@ The yard typed an inbox line into a crew member's pane and advanced its notified
 
 ```json
 {
-  "seq": 295,
+  "seq": 304,
   "kind": "inbox_shown",
   "actor": "signalman",
   "data": {
     "reader": "signalman",
     "session": "",
-    "through": 294
+    "through": 303
   },
   "at": "2026-10-08T09:30:00Z"
 }
@@ -566,7 +566,7 @@ A user acknowledged their notifications, in this client or another.
 
 ```json
 {
-  "seq": 204,
+  "seq": 211,
   "kind": "notifications_read",
   "data": {
     "reader": "jo",
@@ -893,8 +893,8 @@ nothing else. What is not the same:
   inbox calls, `UserAsks`, `UserOpenAsks` and `Waiting`, and the `actor` of `Mail`, `MailPeer`,
   `AnswerAsk`, `DeferAsk`, `DeclineAsk`, their three guarded writes,
   `TakeBackAsk`, `AddNote`, `MoveBead`,
-  `GiveSecret`, `ApproveAsk`, `ApproveSetup`, `TelemetrySet`, `PutStageFile`
-  and `CopyRepoFlows`, may be left out: the yard fills in the user. One that names anyone else is refused with the
+  `GiveSecret`, `ApproveAsk`, `ApproveSetup`, `TelemetrySet`, `PutStageFile`,
+  `CopyRepoFlows` and `IdentityHeldPayloads`, may be left out: the yard fills in the user. One that names anyone else is refused with the
   code `error` (`this device calls as jo: "actor" is jo or left out, not
   yardmaster`). One side of `Conversation` is the user: `a` left out is the
   user, and a conversation between two others is refused. So `GetUser`
@@ -1396,14 +1396,17 @@ reads (mode 0600) or in the system's key store, never in a settings file.
 
 A secret, an approval, the grant list, the teammates list, a removal
 filing, a session's screen, a depot's line, the telemetry switch, a stage
-file's save and a copy of a depot's flows are what the yard holds
+file's save, a copy of a depot's flows, the messages a mapping card holds and
+a webhook delivery's body are what the yard holds
 to this itself, as far as it can see.
 [`GiveSecret`, `ApproveAsk`, `ApproveSetup`, `SourceGrants`, `Teammates`,
 `UninviteTeammate`, `SessionScreen`, `Line`, `TelemetryShow`, `TelemetrySet`,
-`PutStageFile` and `CopyRepoFlows`](#for-the-operator-alone) are taken only from a request
+`PutStageFile`, `CopyRepoFlows`, `IdentityHeldPayloads` and
+`HookPayload`](#for-the-operator-alone) are taken only from a request
 that reached the listener from the yard's own machine, where the proxy or
 tunnel that ends TLS stands (or a client on that machine) — the two
-approvals, `SessionScreen`, `Line` and the teammates calls also down the link from
+approvals, `SessionScreen`, `Line`, the teammates calls, `IdentityHeldPayloads`
+and `HookPayload` also down the link from
 the edge, `PutStageFile` and `CopyRepoFlows` there on a hosted yard and, on any
 other, when the call came sealed, and `GiveSecret` there for every secret on a
 hosted yard and, on any
@@ -1418,8 +1421,8 @@ for a no and never for a yes). Any other is refused with
 the code `error`, in words that name the reason and say what may have
 crossed a network in the clear: `GiveSecret` carries its value, and every
 call carries the operator's device token. A reply may carry the grant list,
-a session's screen (`SessionScreen`), the teammates, a removal filing or the
-telemetry preview. A proxy on another machine that passes requests on to the
+a session's screen (`SessionScreen`), the teammates, a removal filing, the
+telemetry preview, the messages a mapping card holds or a delivery's body. A proxy on another machine that passes requests on to the
 yard in plain HTTP is refused so: from there to the yard the value and the
 token would be readable. An approval holds no secret of its own; it is held
 to the rule so that a token read off a network cannot have a command of the
@@ -1431,7 +1434,15 @@ the screen carries, and crosses the link as an approval does. A depot's line
 carries a group's `cmd` and its prompts whole, so `Line` is held to the rule
 for what the line carries, and crosses the link as an approval does. The teammates
 list and a removal filing hold none either and approve nothing; they are held
-to the rule for the same reason, and cross the link as an approval does. A
+to the rule for the same reason, and cross the link as an approval does. So do
+`IdentityHeldPayloads` and `HookPayload`: what they answer is a stranger's
+message, or a delivery's body whoever sent it, which the yard keeps from every
+agent and from every device but the operator's. A call that came down the link
+plain lets the edge read the reply, with the token that made it; one that came
+sealed ([edge.md](edge.md#footplate-through-the-link)) the edge cannot read. A
+plain call there is taken all the same, as a session's screen is, so the
+operator reads a held message on a paired device through an edge they trust
+with it. A
 save of a stage file and a copy of a depot's flows hold no secret and approve
 nothing, but they write what every bead of a flow is then shown, and the
 operator's device token goes with the request. They are held to the rule for
@@ -1546,7 +1557,8 @@ from having read what was sent; its words say so for a call that came plain, as
 they do for a giving.
 
 A hosted yard takes `GiveSecret`, `SourceGrants`, `SessionScreen`,
-`Teammates`, `UninviteTeammate` and `TelemetryShow` from one peer besides
+`Teammates`, `UninviteTeammate`, `TelemetryShow`, `IdentityHeldPayloads` and
+`HookPayload` from one peer besides
 its own machine: its router, the address the `router_addr` setting names,
 when the request says it came to the router over https
 (`X-Forwarded-Proto: https`). On that network the router is the only such
@@ -1576,7 +1588,7 @@ POST /call/Head
 {}
 
 {
-  "result": 197
+  "result": 204
 }
 ```
 
@@ -2091,7 +2103,7 @@ POST /call/Conversation
       "as": "jo"
     },
     {
-      "seq": 198,
+      "seq": 205,
       "at": "2026-10-08T09:30:00Z",
       "from": "jo",
       "to": "yardmaster",
@@ -2099,7 +2111,7 @@ POST /call/Conversation
       "read": false
     },
     {
-      "seq": 199,
+      "seq": 206,
       "at": "2026-10-08T09:30:00Z",
       "from": "jo",
       "to": "yardmaster",
@@ -2125,7 +2137,7 @@ POST /call/Conversation
 {
   "result": [
     {
-      "seq": 198,
+      "seq": 205,
       "at": "2026-10-08T09:30:00Z",
       "from": "jo",
       "to": "yardmaster",
@@ -2133,7 +2145,7 @@ POST /call/Conversation
       "read": false
     },
     {
-      "seq": 199,
+      "seq": 206,
       "at": "2026-10-08T09:30:00Z",
       "from": "jo",
       "to": "yardmaster",
@@ -2160,7 +2172,7 @@ POST /call/Conversation
 {
   "result": [
     {
-      "seq": 200,
+      "seq": 207,
       "at": "2026-10-08T09:30:00Z",
       "from": "jo",
       "to": "clerk@north",
@@ -3002,6 +3014,26 @@ POST /call/UserAsks
     ],
     "decided": [
       {
+        "bead": "yd-letin",
+        "bead_title": "A message reached talk from U111 in channel C1. Who is this?",
+        "topic": "",
+        "ask": 72,
+        "question": "A message reached talk from U111 in channel C1. Who is this?",
+        "asker": "yard",
+        "since": "2026-10-08T09:30:00Z",
+        "turn": 1,
+        "state": "answered",
+        "option": 5,
+        "option_label": "Let in, once",
+        "delivered": [202, 203],
+        "weight": [
+          {
+            "class": "as-user",
+            "line": "lets calls or words count as a person's: a pick says which user U111 in talk is, and a delivery from them is then heard as that user's"
+          }
+        ]
+      },
+      {
         "bead": "yd-crm",
         "bead_title": "Read the CRM",
         "topic": "",
@@ -3705,6 +3737,7 @@ POST /call/UserAsks
 | `decided[].words` | string, may be absent | what went with the pick, the words answer, or why the question is declined or taken back; for a question another yard asked that ended there, how it ended; for one put aside there, `put aside in <peer>'s yard until <when>`; absent when there are none |
 | `decided[].by` | string, may be absent | who took the ask back, its asker or the operator: it reads "taken back by `<by>`: `<words>`", and is no answer of the person. Absent on every other state, and on a question another yard took back, whose `words` say where |
 | `decided[].return_at` | time, may be absent | when a put-aside ask comes back, here or in the yard that asked it; absent otherwise |
+| `decided[].delivered` | array of number, may be absent | on an answered mapping ask (`identity`), the `seq`s of the hook events its pick released from the messages the card held, oldest first: `HookPayload` reads each whole. Absent on any other ask, and on a mapping ask whose card held nothing or ended with no pick of the person's (a sender mapped by hand, ignored, or a pick of nobody or you decide) |
 
 Read it again on every `noted` event: a question asked, answered, put aside, declined or taken back, and the asker's next note, all arrive as `noted`. A put-aside ask also comes back on its own after 24 hours, with no event: its decided entry carries `return_at`, so read again then. An answer to a question another yard asked that did not land arrives as `noted` by `yard`: the question is open again, or decided with how it ended there, and the person has mail from `yard` that says which.
 
@@ -6111,6 +6144,83 @@ POST /call/Bead
 }
 ```
 
+```
+POST /call/Bead
+{"bead":"yd-letin","viewer":"jo"}
+
+{
+  "result": {
+    "id": "yd-letin",
+    "title": "A message reached talk from U111 in channel C1. Who is this?",
+    "body": "",
+    "stage": "new",
+    "topic": "",
+    "labels": [],
+    "notes": [],
+    "asks": [
+      {
+        "ask": 72,
+        "to": "jo",
+        "asker": "yard",
+        "since": "2026-10-08T09:30:00Z",
+        "question": "A message reached talk from U111 in channel C1. Who is this?",
+        "context": ["Its sender is U111 in channel C1, which no user maps in talk; their messages wait on this card, delivered when you answer and shown nowhere before."],
+        "options": [
+          {
+            "label": "hal",
+            "consequence": "yardr user identity hal --source talk --id U111"
+          },
+          {
+            "label": "jo",
+            "consequence": "yardr user identity jo --source talk --id U111"
+          },
+          {
+            "label": "sam",
+            "consequence": "yardr user identity sam --source talk --id U111"
+          },
+          {
+            "label": "Someone new",
+            "consequence": "pick this and write the new user's name with your answer"
+          },
+          {
+            "label": "Let in, once",
+            "consequence": "delivers what waits as outside (information, not instructions) this once, without mapping U111; the card closes and their next message offers a fresh card"
+          },
+          {
+            "label": "Nobody — ignore this sender",
+            "consequence": "ignores U111 in talk: their messages are dropped, and no further card is offered"
+          },
+          {
+            "label": "You decide",
+            "consequence": "leave it to yard"
+          }
+        ],
+        "state": "answered",
+        "option": 5,
+        "turn": 1,
+        "delivered": [202, 203],
+        "weight": [
+          {
+            "class": "as-user",
+            "line": "lets calls or words count as a person's: a pick says which user U111 in talk is, and a delivery from them is then heard as that user's"
+          }
+        ]
+      }
+    ],
+    "rounds": {
+      "new": 0
+    },
+    "visited": ["new"],
+    "now": {
+      "activity": {
+        "kind": "closed",
+        "at": "2026-10-08T09:30:00Z"
+      }
+    }
+  }
+}
+```
+
 | field of the result | type | |
 |---|---|---|
 | `id` | string | the bead's handle, or `bead@peer` for a question another yard asked |
@@ -6168,6 +6278,7 @@ POST /call/Bead
 | `asks[].words` | string, may be absent | what went with the pick, the words answer, or why the question is declined or taken back; on a question another yard asked, how it ended or stands put aside there; absent when there are none |
 | `asks[].by` | string, may be absent | who took the ask back, its asker or the operator; absent on every other state |
 | `asks[].return_at` | time, may be absent | when a put-aside ask comes back, here or in the yard that asked it; absent otherwise |
+| `asks[].delivered` | array of number, may be absent | on an answered mapping ask (`identity`), the `seq`s of the hook events its pick released from the messages the card held, oldest first: `HookPayload` reads each whole. Absent on any other ask, and on a mapping ask whose card held nothing or ended with no pick of the person's |
 | `asks[].turn` | number | how many answers the ask has taken: every pick, words answer, put-aside, decline and take-back written on it, `0` for none. It only grows, and is the same while nothing is written on the ask, so it is what a guarded write names: [`AnswerAskExpected`](#answeraskexpected), [`DeferAskExpected`](#deferaskexpected) and [`DeclineAskExpected`](#declineaskexpected). A put-aside ask that came back stays at the turn of its put-aside. `0` on a question another yard asked, which takes no guarded write |
 | `asks[].picks_before` | number, may be absent | how many picks there were before the current one, so a client can say "changed"; absent when there were none |
 | `asks[].weight` | array, may be absent | the card's weight as the yard weighed it when it wrote the card: one entry a class, each a way approving it widens what the yard does ([weighty cards](#weighty-cards)). Absent on a routine card |
@@ -7270,6 +7381,19 @@ POST /call/OwnBeads
       "updated_at": "2026-10-08T09:30:00Z",
       "closed_at": "2026-10-08T09:30:00Z",
       "close_reason": "published"
+    },
+    {
+      "id": "yd-letin",
+      "title": "A message reached talk from U111 in channel C1. Who is this?",
+      "type": "question",
+      "stage": "new",
+      "status": "closed",
+      "labels": [],
+      "created_by": "yard",
+      "created_at": "2026-10-08T09:30:00Z",
+      "updated_at": "2026-10-08T09:30:00Z",
+      "closed_at": "2026-10-08T09:30:00Z",
+      "close_reason": "let in once by jo"
     }
   ]
 }
@@ -7740,7 +7864,7 @@ POST /call/MailExchange
         ]
       },
       {
-        "seq": 234,
+        "seq": 241,
         "at": "2026-10-08T09:30:00Z",
         "from": "jo",
         "to": "yardmaster",
@@ -7785,7 +7909,7 @@ operator's alone to make. An operator is a user whose role is `operator`
 there may be several, and each of them makes these calls. The `operator`
 setting names one of them, the one an ask with no `--to` goes to; any
 operator approves or answers it. In yardr's code the list is `OperatorCalls`, and
-it has sixteen calls: `GiveSecret`, which gives the credential a secret ask
+it has eighteen calls: `GiveSecret`, which gives the credential a secret ask
 asks for, `ApproveAsk`, which approves a run ask so that the yard runs
 the command it holds, carrying the approval's values to a hook's register
 call where the card asks for any, `ApproveSetup`, which approves a setup ask with
@@ -7801,7 +7925,9 @@ which files a teammate's removal as a run ask on a new bead; `TelemetryShow`,
 which previews the switch and next request; `TelemetrySet`, which turns
 the switch on or off; `PutStageFile`, which saves the stage file of a stage
 of a store flow, and `CopyRepoFlows`, which copies a depot's repository
-flows into the store; and `DevicePairOpen`, which opens a pairing for one
+flows into the store; `IdentityHeldPayloads`, which reads the messages a
+mapping card holds, and `HookPayload`, which reads a hook delivery's stored
+body; and `DevicePairOpen`, which opens a pairing for one
 device of one user, `DevicePairState`, which reads the open pairing back,
 and `DevicePairClose`, which ends it. Each of the first three
 takes `weighed`, the client's word that its person saw the card's weight,
@@ -7811,7 +7937,8 @@ are weighty code and no card. Where they are served, and to whom:
 
 - **On the socket**, the class table above applies; a call with `actor`
   is held to the store's caller on a pane. `UninviteTeammate` is filed as
-  its caller, and `Teammates` is withheld from agent and crew panes.
+  its caller, and `Teammates` and `IdentityHeldPayloads` are withheld from agent and
+  crew panes; `HookPayload` is any caller's read there, as `yardr hook show <seq>` is.
 - **On the [listener](#over-the-network)**, to a device of an operator:
   a request whose token is one the yard gave a device of that operator
   (`yardr user device add <operator> <device>`, or a pairing). The role is
@@ -9195,7 +9322,7 @@ POST /call/UninviteTeammate
 {
   "result": {
     "bead": "yd-uninvite",
-    "ask": 97
+    "ask": 99
   }
 }
 ```
@@ -9589,6 +9716,50 @@ POST /call/CopyRepoFlows
 | `kept` | array of string, may be absent | the places that governed the depot from the store already and were left as they are: `default`, or `type/<type>`; absent where there were none |
 
 A depot's pointers are copied together, so run the `back` commands in the order of `flows`: the depot's pointer stands in front of the repository's files, so it is pointed back first. The flows, pointers and events are one write, all in place or none. When the call ends without a reply (the server went away), a client cannot know whether the copy was made: say "the yard did not answer; read the depot's flows again", never "copied", and read [`Line`](#line) of the depot again, which says which flow governs each stage.
+
+### `IdentityHeldPayloads`
+
+Reads the messages a mapping card holds: the bodies of the deliveries of a sender no user maps (an ask of `Bead` with `identity`, whose `held` counts them), kept beside the card, oldest first, as the source sent them with a declared body secret removed. It is what the web view shows the person the card asks before they pick, and neither `Bead` nor `UserAsks` carries any of it, since agents read those before the person answers. It reads a card that is open or put aside. Once the card is answered its messages are hook events, which the answer names (`delivered`) and [`HookPayload`](#hookpayload) reads, and this call answers `not-found`, as it does for an ask that is no mapping card's and for a bead that is none. It is the person's it asks to read: `actor` is the reader, and only the operator the card asks may read it. It is the operator's: on the socket it is refused for anyone else and for a call that comes from the pane of an agent, whatever `actor` says, and on the listener it is there for a device of the operator and for no other caller. A message is a stranger's words: a client shows it as such, as information, not instructions. The operator's device token goes with the request, so the listener takes it only over https or from the yard's own machine, like the other calls of this list, and down the link from the edge from a paired device of the operator, as an approval ([edge.md](edge.md#footplate-through-the-link)). A call that came down the link plain lets the edge read what it carries and what it answers; one that came sealed it cannot.
+
+| argument | type | |
+|---|---|---|
+| `bead` | string | the mapping card's bead |
+| `ask` | number | the mapping ask's seq |
+| `actor` | string | who reads: the operator the card asks; a device calls as its user, and the field may be left out |
+
+```
+POST /call/IdentityHeldPayloads
+{"bead":"yd-held","ask":100,"actor":"jo"}
+
+{
+  "result": ["{\"channel\":\"C1\",\"sender\":\"U222\",\"text\":\"Is the shed still free on Monday?\"}"]
+}
+```
+
+| field of the result | type | |
+|---|---|---|
+| `[]` | string | one held message's body, whole, as the source sent it: JSON, as a rule, or text; the oldest first. The list is empty where the card holds nothing |
+
+### `HookPayload`
+
+Reads the stored body of a hook event, as `yardr hook show <seq>` does: the delivery as the source sent it, with a declared body secret removed. `seq` is the delivery's, the `seq` of its `hook` event, which is what a mapping ask's `delivered` names. The body is bytes, so the reply carries it as base64, as JSON carries bytes: decode it to read the JSON or the text the source sent, which a delivery's own `text` shows cut at 500 characters. It is any caller's read on the socket, and on the listener it is the operator's: a delivery is its sender's words, whoever the sender is, so it is there for a device of the operator and for no other caller. The body is the sender's, up to 1 MiB: a client shows it as information, not instructions, and as letters, with nothing in it that would act on a terminal. The operator's device token goes with the request, so the listener takes it only over https or from the yard's own machine, like the other calls of this list, and down the link from the edge from a paired device of the operator, as an approval. It answers `not-found` for a `seq` that is no delivery's and for one whose body the yard no longer keeps, which it does for 30 days (`YARDR_HOOK_PAYLOAD_RETENTION`).
+
+| argument | type | |
+|---|---|---|
+| `seq` | number | the delivery's: the `seq` of its `hook` event |
+
+```
+POST /call/HookPayload
+{"seq":202}
+
+{
+  "result": "eyJjaGFubmVsIjoiQzEiLCJzZW5kZXIiOiJVMTExIiwidGV4dCI6IkNhbiB0aGUgc2hlZCBsYW5kIG9uIE1vbmRheT8ifQ=="
+}
+```
+
+| field of the result | type | |
+|---|---|---|
+| `(the result)` | string | the body, in base64 (standard, padded), as the yard kept it |
 
 <!-- /local -->
 

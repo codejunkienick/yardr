@@ -118,12 +118,13 @@ type DecidedAsk struct {
 	Setup *SetupAsked `json:"setup,omitempty"`
 	// Identity is what a mapping ask maps; absent on any other ask.
 	Identity *IdentityAsked `json:"identity,omitempty"`
+	// Delivered are the hook events a mapping pick released; absent until it does.
+	Delivered []uint64 `json:"delivered,omitempty"`
 	// DepotPush is the push a depot-push ask turns on or off, with the
 	// yard's words for it; absent on any other ask.
 	DepotPush *DepotPushAsked `json:"depot_push,omitempty"`
-	// Weight is the card's weight, each class with the yard's line, as
-	// the yard weighed it when it wrote the card; absent on a routine
-	// card.
+	// Weight is the card's weight, each class with the yard's line, as the
+	// yard weighed it when it wrote the card; absent on a routine card.
 	Weight []AskWeight `json:"weight,omitempty"`
 }
 
@@ -382,7 +383,7 @@ func (d *DecidedAsk) decidedBy(r ResolvedAsk) {
 	if d.Option >= 1 && d.Option <= len(r.Ask.Options) {
 		d.OptionLabel = r.Ask.Options[d.Option-1].Label
 	}
-	d.Words, d.Given, d.Ran = c.Answer.Words, c.Answer.Given, c.Answer.Ran
+	d.Words, d.Given, d.Ran, d.Delivered = c.Answer.Words, c.Answer.Given, c.Answer.Ran, c.Answer.Delivered
 	if r.State == AskTakenBack {
 		d.By = c.Note.Author
 	}
@@ -591,12 +592,13 @@ type BeadAsk struct {
 	Setup *SetupAsked `json:"setup,omitempty"`
 	// Identity is what a mapping ask maps; absent on any other ask.
 	Identity *IdentityAsked `json:"identity,omitempty"`
+	// Delivered are the hook events a mapping pick released; absent until it does.
+	Delivered []uint64 `json:"delivered,omitempty"`
 	// DepotPush is the push a depot-push ask turns on or off, with the
 	// yard's words for it; absent on any other ask.
 	DepotPush *DepotPushAsked `json:"depot_push,omitempty"`
-	// Weight is the card's weight, each class with the yard's line, as
-	// the yard weighed it when it wrote the card; absent on a routine
-	// card.
+	// Weight is the card's weight, each class with the yard's line, as the
+	// yard weighed it when it wrote the card; absent on a routine card.
 	Weight []AskWeight `json:"weight,omitempty"`
 }
 
@@ -743,7 +745,7 @@ func (s *Store) Bead(ctx context.Context, id string, viewer ...string) (*BeadVie
 			a.About = append(a.About, about)
 		}
 		if c := r.Current; c != nil {
-			a.Option, a.Words, a.Given, a.Ran = c.Answer.Option, c.Answer.Words, c.Answer.Given, c.Answer.Ran
+			a.Option, a.Words, a.Given, a.Ran, a.Delivered = c.Answer.Option, c.Answer.Words, c.Answer.Given, c.Answer.Ran, c.Answer.Delivered
 			if r.State == AskTakenBack {
 				a.By = c.Note.Author
 			}

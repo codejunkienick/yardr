@@ -205,8 +205,8 @@ func TestUserServesTheCallsAndNoOther(t *testing.T) {
 	if len(served) != len(Calls) || len(served) != wantCalls {
 		t.Errorf("%d calls are served and Calls has %d, want %d of each: %v", len(served), len(Calls), wantCalls, served)
 	}
-	if !slices.Equal(operators, []string{"ApproveAsk", "ApproveSetup", "CopyRepoFlows", "GiveSecret", "Line", "PutStageFile", "SessionScreen", "SourceGrants", "Teammates", "TelemetrySet", "TelemetryShow", "UninviteTeammate"}) || len(OperatorCalls) != wantOperatorCalls {
-		t.Errorf("a device of the operator is served %v besides, and OperatorCalls is %v: want ApproveAsk, ApproveSetup, CopyRepoFlows, GiveSecret, Line, PutStageFile, SessionScreen, SourceGrants, Teammates, TelemetrySet, TelemetryShow, UninviteTeammate and no other of its %d", operators, OperatorCalls, wantOperatorCalls)
+	if !slices.Equal(operators, []string{"ApproveAsk", "ApproveSetup", "CopyRepoFlows", "GiveSecret", "HookPayload", "IdentityHeldPayloads", "Line", "PutStageFile", "SessionScreen", "SourceGrants", "Teammates", "TelemetrySet", "TelemetryShow", "UninviteTeammate"}) || len(OperatorCalls) != wantOperatorCalls {
+		t.Errorf("a device of the operator is served %v besides, and OperatorCalls is %v: want ApproveAsk, ApproveSetup, CopyRepoFlows, GiveSecret, HookPayload, IdentityHeldPayloads, Line, PutStageFile, SessionScreen, SourceGrants, Teammates, TelemetrySet, TelemetryShow, UninviteTeammate and no other of its %d", operators, OperatorCalls, wantOperatorCalls)
 	}
 	// The whole grant graph is the operator's to read: to sam's device the
 	// call is not there, as a method the yard does not have, whatever it
@@ -1395,6 +1395,247 @@ func TestUserUninviteTeammate(t *testing.T) {
 	if got := localCall(t, h, token, "Teammates", `{}`); strings.Contains(got, "sam@example.net") {
 		t.Errorf("Teammates after the removal = %s, want sam gone", got)
 	}
+}
+
+// heldSource is a declared source that hears by identity, so that a message
+// from a sender no user maps is held on a mapping card.
+const heldSource = `name: talk
+base: https://talk.example.com
+credential: { env: TALK_TOKEN }
+calls:
+  message:
+    kind: update
+    params: { text: { type: string } }
+    request: { method: POST, path: /send, body: { text: "{text}" } }
+hook:
+  verify: { scheme: secret, signature: { header: Talk-Secret } }
+  bodies: unique
+  normalize: [normalize]
+  keys: [sender, channel]
+hear:
+  field: sender
+  by: identity
+`
+
+// heldCard is a yard where a message waits on a mapping card for the
+// operator jo, as a stranger's does: the card's bead and ask, and the body
+// held on it.
+func heldCard(t *testing.T, st *store.Store) (bead string, ask uint64, body string) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := st.PutSource(ctx, "talk.yaml", heldSource, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	body = `{"sender":"U999","text":"HELD-ONE can the shed land on Monday?"}`
+	env := map[string]any{
+		"source": "talk", "type": "message", "action": "create", "text": "HELD-ONE can the shed",
+		"fields": map[string]any{"sender": []any{"U999"}, "channel": []any{"C1"}},
+	}
+	if held, err := st.HoldIdentity(ctx, "talk", "talk", "U999", "C1", env, []byte(body), nil); err != nil || !held {
+		t.Fatalf("HoldIdentity = %v, %v", held, err)
+	}
+	q, err := st.UserAsks(ctx, "jo", "jo")
+	if err != nil || len(q.Open) != 1 || q.Open[0].Identity == nil {
+		t.Fatalf("the operator's queue = %+v, %v, want the one mapping card", q, err)
+	}
+	return q.Open[0].Bead, q.Open[0].Ask, body
+}
+
+// An operator's device reads the messages a mapping card holds over the
+// listener, as the web view shows them to the person the card asks: while the
+// card is open and while it is put aside, and no longer once it is answered,
+// when they are hook events. The device is the operator's alone, and it reads
+// as its user: an actor that names another is refused, and left out is the
+// device's user. The call carries the device's token, so it is taken from the
+// yard's own machine, from the router over https and down the link from the
+// edge, and from no other machine and no proxy that says it came in plain.
+func TestUserReadsHeldMessages(t *testing.T) {
+	ctx := context.Background()
+	st, u, token := userYard(t)
+	h := u.Handler()
+	tablet, err := st.AddDevice(ctx, "sam", "tablet", "jo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bead, askSeq, body := heldCard(t, st)
+	args := fmt.Sprintf(`{"bead":%q,"ask":%d}`, bead, askSeq)
+	want, _ := json.Marshal(reply{Result: []string{body}})
+	read := func(label, got string) {
+		t.Helper()
+		if got != string(want) {
+			t.Errorf("IdentityHeldPayloads %s = %s, want %s", label, got, want)
+		}
+	}
+	read("from the yard's machine", localCall(t, h, token, "IdentityHeldPayloads", args))
+	read("naming the device's user", localCall(t, h, token, "IdentityHeldPayloads", fmt.Sprintf(`{"bead":%q,"ask":%d,"actor":"jo"}`, bead, askSeq)))
+	read("down the link from the edge", edgeCall(t, h, token, "IdentityHeldPayloads", args))
+	if err := st.SetSetting(ctx, store.RouterAddrSetting, "192.0.2.15", "jo"); err != nil {
+		t.Fatal(err)
+	}
+	routed := httptest.NewRequest(http.MethodPost, "/user/call/IdentityHeldPayloads", strings.NewReader(args))
+	routed.RemoteAddr = "192.0.2.15:40000"
+	routed.Header.Set("Authorization", "Bearer "+token)
+	routed.Header.Set("X-Forwarded-Proto", "https")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, routed)
+	read("through the TLS router", strings.TrimSpace(w.Body.String()))
+
+	// A put-aside card keeps what it holds, and the person reads it.
+	if err := st.DeferAsk(ctx, bead, askSeq, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	read("on a put-aside card", localCall(t, h, token, "IdentityHeldPayloads", args))
+
+	// The reader is the device's user. Another name is refused without being said
+	// back, before the store is asked; a member's device is answered as for a
+	// method the yard does not have, whatever it names, and so is a credential
+	// that names no device.
+	for _, actor := range []string{"sam", "yardmaster"} {
+		got := reasonOf(t, h, token, "IdentityHeldPayloads", fmt.Sprintf(`{"bead":%q,"ask":%d,"actor":%q}`, bead, askSeq, actor))
+		if got != `this device calls as jo: "actor" is jo or left out` {
+			t.Errorf("IdentityHeldPayloads as %s from jo's device is refused %q, want it held to jo", actor, got)
+		}
+	}
+	none, _ := json.Marshal(noSuchMethod("IdentityHeldPayloads"))
+	for _, remote := range []string{"127.0.0.1:40000", "203.0.113.9:40000", linkRemoteAddr} {
+		r := httptest.NewRequest(http.MethodPost, "/user/call/IdentityHeldPayloads", unread{t})
+		r.RemoteAddr = remote
+		r.Header.Set("Authorization", "Bearer "+tablet.Token)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if got := strings.TrimSpace(w.Body.String()); got != string(none) {
+			t.Errorf("IdentityHeldPayloads from sam's device at %s = %s, want %s", remote, got, none)
+		}
+	}
+
+	// Taken from no other machine, and from no proxy that says it came in plain,
+	// before the body is read.
+	for _, c := range []struct{ name, remote, proto, want string }{
+		{"another machine", "203.0.113.9:40000", "", "in plain HTTP from another machine"},
+		{"another machine that says https", "203.0.113.9:40000", "https", "in plain HTTP from another machine"},
+		{"a proxy on the machine that says plain", "127.0.0.1:40000", "http", "the proxy in front of the yard says this request came to it in plain HTTP"},
+		{"the link behind a proxy that says plain", linkRemoteAddr, "http", "the proxy in front of the yard says this request came to it in plain HTTP"},
+	} {
+		r := httptest.NewRequest(http.MethodPost, "/user/call/IdentityHeldPayloads", unread{t})
+		r.RemoteAddr = c.remote
+		r.Header.Set("Authorization", "Bearer "+token)
+		if c.proto != "" {
+			r.Header.Set("X-Forwarded-Proto", c.proto)
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		_, refused := answerOf(t, w.Body.Bytes())
+		for _, want := range []string{"a mapping card's held messages is taken over https only", c.want, "yardr user device rm", "or read them on the yard's machine."} {
+			if !strings.Contains(refused, want) {
+				t.Errorf("IdentityHeldPayloads from %s is refused %q, want it to say %q", c.name, refused, want)
+			}
+		}
+		if strings.Contains(w.Body.String(), "HELD-ONE") {
+			t.Errorf("IdentityHeldPayloads from %s answered the body: %s", c.name, w.Body)
+		}
+	}
+
+	// Answered, the card holds nothing to read: the messages are hook events,
+	// which its answer names.
+	if err := st.AnswerAsk(ctx, bead, askSeq, pickOf(t, st, bead, store.MappingLetIn), "", "jo", false); err != nil {
+		t.Fatal(err)
+	}
+	if got := reasonOf(t, h, token, "IdentityHeldPayloads", args); !strings.Contains(got, "not found") || strings.Contains(got, "HELD-ONE") {
+		t.Errorf("IdentityHeldPayloads of an answered card is refused %q, want it not found", got)
+	}
+}
+
+// pickOf is the number of the option of the card's one ask that is labelled label.
+func pickOf(t *testing.T, st *store.Store, bead, label string) int {
+	t.Helper()
+	view, err := st.Bead(context.Background(), bead)
+	if err != nil || len(view.Asks) != 1 {
+		t.Fatalf("the card's bead = %+v, %v", view, err)
+	}
+	for i, o := range view.Asks[0].Options {
+		if o.Label == label {
+			return i + 1
+		}
+	}
+	t.Fatalf("the card offers %v, want %s among them", view.Asks[0].Options, label)
+	return 0
+}
+
+// An operator's device reads the stored body of a hook event over the
+// listener, as `yardr hook show <seq>` does: the bytes the source sent, with a
+// declared body secret removed, which the reply carries as base64, as every
+// call carries bytes. A member's device is answered as for a method the yard
+// does not have. The call carries the device's token, so it is taken from the
+// yard's own machine and down the link from the edge, and from no other
+// machine and no proxy that says it came in plain.
+func TestUserReadsAHookBody(t *testing.T) {
+	ctx := context.Background()
+	st, u, token := userYard(t)
+	h := u.Handler()
+	tablet, err := st.AddDevice(ctx, "sam", "tablet", "jo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := []byte(`{"from":{"address":"ada@example.com"},"subject":"the shed","text":"` + strings.Repeat("a long message ", 60) + `"}`)
+	seq, _, err := st.RecordHook(ctx, "mail", map[string]any{"source": "mail", "type": "message", "text": "cut…"}, body, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := fmt.Sprintf(`{"seq":%d}`, seq)
+	want, _ := json.Marshal(reply{Result: body})
+	if got := localCall(t, h, token, "HookPayload", args); got != string(want) {
+		t.Errorf("HookPayload from the yard's machine = %s, want %s", got, want)
+	}
+	if got := edgeCall(t, h, token, "HookPayload", args); got != string(want) {
+		t.Errorf("HookPayload down the link from the edge = %s, want %s", got, want)
+	}
+	if got := reasonOf(t, h, token, "HookPayload", `{"seq":999999}`); !strings.Contains(got, "not found") {
+		t.Errorf("HookPayload of no delivery is refused %q, want it not found", got)
+	}
+	none, _ := json.Marshal(noSuchMethod("HookPayload"))
+	for _, remote := range []string{"127.0.0.1:40000", "203.0.113.9:40000", linkRemoteAddr} {
+		r := httptest.NewRequest(http.MethodPost, "/user/call/HookPayload", unread{t})
+		r.RemoteAddr = remote
+		r.Header.Set("Authorization", "Bearer "+tablet.Token)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if got := strings.TrimSpace(w.Body.String()); got != string(none) {
+			t.Errorf("HookPayload from sam's device at %s = %s, want %s", remote, got, none)
+		}
+	}
+	for _, c := range []struct{ name, remote, proto, want string }{
+		{"another machine", "203.0.113.9:40000", "", "in plain HTTP from another machine"},
+		{"a proxy on the machine that says plain", "127.0.0.1:40000", "http", "the proxy in front of the yard says this request came to it in plain HTTP"},
+		{"the link behind a proxy that says plain", linkRemoteAddr, "http", "the proxy in front of the yard says this request came to it in plain HTTP"},
+	} {
+		r := httptest.NewRequest(http.MethodPost, "/user/call/HookPayload", unread{t})
+		r.RemoteAddr = c.remote
+		r.Header.Set("Authorization", "Bearer "+token)
+		if c.proto != "" {
+			r.Header.Set("X-Forwarded-Proto", c.proto)
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		_, refused := answerOf(t, w.Body.Bytes())
+		for _, want := range []string{"a webhook delivery's body is taken over https only", c.want, "yardr user device rm", "or read it on the yard's machine (`yardr hook show <seq>`)."} {
+			if !strings.Contains(refused, want) {
+				t.Errorf("HookPayload from %s is refused %q, want it to say %q", c.name, refused, want)
+			}
+		}
+	}
+}
+
+// reasonOf is the refusal the device's call from the yard's own machine is
+// answered with, whatever its status.
+func reasonOf(t *testing.T, h http.Handler, token, method, body string) string {
+	t.Helper()
+	r := httptest.NewRequest(http.MethodPost, "/user/call/"+method, strings.NewReader(body))
+	r.RemoteAddr = "127.0.0.1:40000"
+	r.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	_, refused := answerOf(t, w.Body.Bytes())
+	return refused
 }
 
 // The event a device is sent without its value, or without a file or a

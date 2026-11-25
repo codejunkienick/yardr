@@ -459,6 +459,35 @@ func TestTextIsTruncated(t *testing.T) {
 	if n := len([]rune(e.Text)); n != hooks.MaxText || !strings.HasSuffix(e.Text, "…") {
 		t.Fatalf("text of %d runes", n)
 	}
+	if !hooks.TextCut(e.Text) {
+		t.Fatalf("the text truncate left, %d runes ending in %q, does not read as cut", len([]rune(e.Text)), []rune(e.Text)[hooks.MaxText-1:])
+	}
+}
+
+// A text reads as cut when it is MaxText runes ending in the cut mark, as
+// truncate leaves one and as a pack that cuts the same way does, and as no
+// other: not a text a rune short or a rune over, nor one of the length with
+// no mark.
+func TestTextCut(t *testing.T) {
+	t.Parallel()
+	whole := strings.Repeat("é", hooks.MaxText-1)
+	for _, c := range []struct {
+		name string
+		text string
+		want bool
+	}{
+		{"truncate's", whole + "…", true},
+		{"a pack's, in ASCII", strings.Repeat("a", hooks.MaxText-1) + "…", true},
+		{"a rune short", whole[:len(whole)-2] + "…", false},
+		{"a rune over", whole + "x…", false},
+		{"the length with no mark", whole + "é", false},
+		{"the mark alone", "…", false},
+		{"nothing", "", false},
+	} {
+		if got := hooks.TextCut(c.text); got != c.want {
+			t.Errorf("%s: TextCut = %v, want %v", c.name, got, c.want)
+		}
+	}
 }
 
 // delegateDepot is a depot whose receiver serves the declared source

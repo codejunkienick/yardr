@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"yardr.dev/yardr/internal/hooks"
 	"yardr.dev/yardr/internal/store"
 	"yardr.dev/yardr/internal/storetest"
 )
@@ -58,6 +59,28 @@ func TestHookDeliveryLine(t *testing.T) {
 		"; not taken: document of 1048576 bytes, over the yard's limit of 8192 (shed-plans.pdf)\n"
 	if got := buf.String(); got != want {
 		t.Errorf("with files:\ngot  %q\nwant %q", got, want)
+	}
+	// A text cut at hooks.MaxText says so, and names the command that reads the
+	// delivery whole, whether hooks.truncate cut it or a pack's normalize did
+	// before the core saw it; a text of any other length is printed as it was.
+	const prefix = "     7 10-02 09:14  hook (mentioned) linear comment create by Jane on \"Retries\": "
+	for _, c := range []struct{ name, text, cue string }{
+		{"cut by the core", strings.Repeat("é", hooks.MaxText-1) + "…", " (cut; read whole: yardr hook show 7)"},
+		{"cut by a pack", strings.Repeat("a", hooks.MaxText-1) + "…", " (cut; read whole: yardr hook show 7)"},
+		{"a rune short of the cut", strings.Repeat("a", hooks.MaxText-2) + "…", ""},
+		{"the length of the cut with no mark", strings.Repeat("a", hooks.MaxText), ""},
+		{"short", "can you look?", ""},
+	} {
+		long := store.Event{Seq: 7, Kind: "hook", At: e.At, Data: map[string]any{}}
+		for k, v := range e.Data {
+			long.Data[k] = v
+		}
+		long.Data["text"] = c.text
+		buf.Reset()
+		printInboxEvent(&buf, long, "yardmaster", "", nil)
+		if got, want := buf.String(), prefix+c.text+c.cue+"  https://x/1\n"; got != want {
+			t.Errorf("a text %s:\ngot  %q\nwant %q", c.name, got, want)
+		}
 	}
 }
 

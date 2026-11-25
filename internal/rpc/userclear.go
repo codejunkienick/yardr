@@ -105,6 +105,12 @@ func inTheClear(r *http.Request, name, router string, crosses, member, google bo
 	if name == "UninviteTeammate" {
 		return teammatesInTheClear(r, router, "filing a teammate's removal", "file it on the yard's machine.")
 	}
+	if name == "IdentityHeldPayloads" {
+		return teammatesInTheClear(r, router, "a mapping card's held messages", "read them on the yard's machine.")
+	}
+	if name == "HookPayload" {
+		return teammatesInTheClear(r, router, "a webhook delivery's body", "read it on the yard's machine (`yardr hook show <seq>`).")
+	}
 	if name == "TelemetryShow" {
 		return telemetryShowInTheClear(r, router)
 	}

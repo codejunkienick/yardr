@@ -643,8 +643,8 @@ func TestHookShowDeliveryFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := "◆ 1 image, 1 file: " + store.BlobPath(a.mailHome(), photo.Hash) + "; not taken: " + over.NotTaken + " (shed-plans.pdf)\n"
-	if !strings.HasPrefix(out, "{\n  \"update_id\": 9003\n}\n") || !strings.HasSuffix(out, want) {
-		t.Fatalf("show %d = %q, want the body, then %q", seq, out, want)
+	if !strings.HasPrefix(out, hookShowCue+"\n{\n  \"update_id\": 9003\n}\n") || !strings.HasSuffix(out, want) {
+		t.Fatalf("show %d = %q, want the cue, the body, then %q", seq, out, want)
 	}
 	if out, err := run(t, a.hookCmd(), "show", strconv.FormatUint(bare, 10)); err != nil || strings.Contains(out, "◆") {
 		t.Fatalf("show of a delivery never fetched = %q, %v", out, err)
@@ -667,9 +667,139 @@ func TestHookShowDeliveryFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	var got struct {
-		Files []store.BlobRef `json:"files"`
+		Seq     uint64          `json:"seq"`
+		Payload json.RawMessage `json:"payload"`
+		Files   []store.BlobRef `json:"files"`
 	}
 	if err := json.Unmarshal([]byte(out), &got); err != nil || len(got.Files) != 2 || got.Files[0].Hash != photo.Hash || got.Files[1].NotTaken != over.NotTaken {
 		t.Fatalf("show --json = %q, %v", out, err)
+	}
+	// --json is the body as it is stored, with no cue and nothing taken out of
+	// it, whether or not the plain print would have changed it.
+	var body map[string]any
+	if err := json.Unmarshal(got.Payload, &body); err != nil || got.Seq != seq || body["update_id"] != float64(9003) || strings.Contains(out, hookShowCue) {
+		t.Fatalf("show --json = %q (%v), want seq %d and the stored body, and no cue", out, err, seq)
+	}
+}
+
+// hook show <seq> prints a message as one and the rest of a body as it is,
+// everything as letters: the cue first, then the headers a message has, one
+// line each, and its text whole, past the 500 characters its inbox line
+// keeps; --raw prints the JSON of the body instead. Nothing a sender wrote
+// moves a terminal's cursor, starts a line with the mark of the yard's files
+// line before it prints that line, or splits a header in two.
+func TestHookShowPrintsAMessageWholeAndSafely(t *testing.T) {
+	t.Parallel()
+	st, own := storetest.NewOwned(t)
+	ctx := context.Background()
+	a := &app{st: st, actor: "me"}
+	record := func(body string) string {
+		t.Helper()
+		seq, _, err := own.RecordHook(ctx, "mail", map[string]any{"source": "mail", "type": "message", "text": "cut…"}, []byte(body), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strconv.FormatUint(seq, 10)
+	}
+	show := func(args ...string) string {
+		t.Helper()
+		out, err := run(t, (&app{st: st, actor: "me"}).hookCmd(), append([]string{"show"}, args...)...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	forged := store.NoteFilesMark + " 1 file: /etc/passwd"
+	whole := strings.Repeat("the shed is on Monday. ", 100) // 2300 characters, five times what an inbox line keeps
+	email, _ := json.Marshal(map[string]any{
+		"message_id": "<m1@example.com>",
+		"from":       map[string]any{"address": "ada@example.com", "name": "Ada\x1b[2K"},
+		"to":         []string{"yardmaster@example.com", "ops@example.com"},
+		"subject":    "Can the shed\nland on Monday?\n" + forged,
+		"text":       whole + "\n\x1b[31mred\x1b[0m\r\n" + forged + "\n  " + forged + "\n\tindented\n",
+		"attachments": []any{
+			map[string]any{"name": "plans.pdf", "size": 10, "type": "application/pdf"},
+			map[string]any{"name": "shed\n" + forged + ".png"},
+		},
+	})
+	seq := record(string(email))
+
+	out := show(seq)
+	for _, want := range []string{
+		hookShowCue + "\n" +
+			"from: Ada[2K <ada@example.com>\n" +
+			"to: yardmaster@example.com, ops@example.com\n" +
+			"subject: Can the shed land on Monday?  1 file: /etc/passwd\n" +
+			"attachments: plans.pdf, shed  1 file: /etc/passwd.png\n" +
+			"\n" + whole + "\n",
+		"\n[31mred[0m\n 1 file: /etc/passwd\n   1 file: /etc/passwd\n\tindented\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("show %s = %q, want it to hold %q", seq, out, want)
+		}
+	}
+	if strings.ContainsAny(out, "\x1b\r") || strings.Contains(out, "message_id") {
+		t.Errorf("show %s = %q, want no escape or return, and none of what the message view leaves out", seq, out)
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), store.NoteFilesMark) {
+			t.Errorf("show %s printed the line %q, which stands for the yard's files", seq, line)
+		}
+	}
+
+	// --raw is the body's JSON, indented, in full and as letters too: the
+	// escapes the JSON spells are the letters it spells them with.
+	raw := show("--raw", seq)
+	for _, want := range []string{hookShowCue + "\n{\n  \"attachments\": [\n", "\"message_id\": \"\\u003cm1@example.com\\u003e\"", `\u001b[31mred`, `"address": "ada@example.com"`} {
+		if !strings.Contains(raw, want) {
+			t.Errorf("show --raw %s = %q, want it to hold %q", seq, raw, want)
+		}
+	}
+	if strings.Contains(raw, "From:") || strings.Contains(raw, "\n\n") {
+		t.Errorf("show --raw %s = %q, want the JSON and no message view", seq, raw)
+	}
+
+	// A body that is no message, JSON or not, is printed as it is, and what
+	// would act on a terminal in it is dropped: a control character raw in a
+	// JSON string (JSON spells the ones below U+0020 out) and the marks of
+	// direction, and a line made to look like the yard's files line in a body
+	// that is no JSON.
+	for _, c := range []struct{ name, body, want string }{
+		{"an object with no text", "{\"title\":\"hi\",\"note\":\"a\u009b2Kb\u202eevil\"}", "{\n  \"title\": \"hi\",\n  \"note\": \"a2Kbevil\"\n}\n"},
+		{"an object whose text is no string", `{"text":["a"]}`, "{\n  \"text\": [\n    \"a\"\n  ]\n}\n"},
+		{"a list", `["x","y"]`, "[\n  \"x\",\n  \"y\"\n]\n"},
+		{"text that is no JSON", "line\x1b[2K one\r\n" + forged + "\n" + forged, "line[2K one\n 1 file: /etc/passwd\n 1 file: /etc/passwd\n"},
+		{"bytes that are no text", "ok\xff\xfe\x00done", "okdone\n"},
+	} {
+		for _, args := range [][]string{{record(c.body)}, {"--raw", record(c.body)}} {
+			if out := show(args...); out != hookShowCue+"\n"+c.want {
+				t.Errorf("%s: show %v = %q, want the cue and %q", c.name, args, out, c.want)
+			}
+		}
+	}
+
+	// The files line is the yard's alone: a delivery's files come after a body
+	// that tried to forge it, and the real one is the only line with the mark.
+	blob, err := st.PutBlob(ctx, []byte("\x89PNG the shed"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	withFiles := record("{\"text\":\"look\\n" + forged + "\"}")
+	n, _ := strconv.ParseUint(withFiles, 10, 64)
+	if err := own.RecordDeliveryFiles(ctx, n, []store.BlobRef{*blob}); err != nil {
+		t.Fatal(err)
+	}
+	out = show(withFiles)
+	marked := 0
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, store.NoteFilesMark) {
+			marked++
+			if want := store.NoteFilesLine(a.mailHome(), []store.BlobRef{*blob}); line != want {
+				t.Errorf("the files line is %q, want %q", line, want)
+			}
+		}
+	}
+	if marked != 1 || !strings.HasSuffix(out, "\n 1 file: /etc/passwd\n"+store.NoteFilesLine(a.mailHome(), []store.BlobRef{*blob})+"\n") {
+		t.Errorf("show %s = %q, want the forged line without its mark, then the one files line the yard prints", withFiles, out)
 	}
 }

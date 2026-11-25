@@ -48,6 +48,7 @@ var selfArg = map[string][]string{
 	"TelemetrySet":         {"actor"},
 	"PutStageFile":         {"actor"},
 	"CopyRepoFlows":        {"actor"},
+	"IdentityHeldPayloads": {"actor"},
 	"DevicePairCloseSelf":  {"user"},
 }
 

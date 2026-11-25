@@ -619,7 +619,8 @@ func (w *wtx) ignoreSender(ctx context.Context, name, sender, actor string) erro
 			return err
 		}
 	}
-	return w.retireMappingCards(name, func(card string) bool { return card == sender }, "ignored", actor)
+	_, err := w.retireMappingCards(name, func(card string) bool { return card == sender }, "ignored", actor)
+	return err
 }
 
 // UnignoreSource removes the sender id from the source's ignore list

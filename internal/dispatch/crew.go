@@ -851,6 +851,7 @@ func (d *Dispatcher) crewRunning(ctx context.Context, runner Runner, s *memberSe
 	}) {
 		msg += " Answer mail with yardr reply <seq>, the number its inbox line starts with."
 	}
+	msg += cutHookNudge(page.Events)
 	// The files the inbox carries, each by its path: what a crew member's
 	// harness reads a file by, on a marked line of their own as where each
 	// event itself is read.

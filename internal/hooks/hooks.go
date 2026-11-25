@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Rejections. The receiver answers ErrUnauthorized with 401 and
@@ -31,6 +32,19 @@ var (
 // MaxText bounds Envelope.Text: enough to decide whether to look closer,
 // never the whole body (that is in the stored payload).
 const MaxText = 500
+
+// cutMark ends a text that truncate shortened.
+const cutMark = "…"
+
+// TextCut reports whether an envelope's text was cut: MaxText runes ending in
+// the cut mark, which is what truncate leaves of a longer one. A pack whose
+// normalize command cuts its text the same way (cloudflare-email's does) is
+// caught too, with no change to the pack or to what was stored. A text that
+// is that long and ends in the mark by chance reads as cut, and what a
+// reader is then sent to, the stored payload, holds it whole all the same.
+func TextCut(text string) bool {
+	return utf8.RuneCountInString(text) == MaxText && strings.HasSuffix(text, cutMark)
+}
 
 // Envelope is a delivery in the shape routing reads, whatever the source.
 type Envelope struct {
@@ -182,7 +196,7 @@ func truncate(s string) string {
 	if len(r) <= MaxText {
 		return s
 	}
-	return string(r[:MaxText-1]) + "…"
+	return string(r[:MaxText-1]) + cutMark
 }
 
 func bad(format string, args ...any) error {

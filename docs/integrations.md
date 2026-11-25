@@ -113,7 +113,7 @@ type Adapter interface {
 | `thread` | what the delivery belongs to, as `id`, `title`, `url`: the issue a comment is on, or the issue itself. Empty for what belongs to nothing (a `token` message). GitHub gives a CI run on no pull request the thread of its branch, which is no issue (see GitHub) |
 | `mentions` | the ids or keys of the people the text mentions |
 | `assignee`, `delegate` | who the issue is assigned to, and (Linear) the agent it is handed to while a person stays the assignee |
-| `text` | the start of the delivery's own words, whitespace collapsed, at most 500 characters |
+| `text` | the start of the delivery's own words, whitespace collapsed, at most 500 characters. A text that was cut says so where it is read: its inbox line ends `(cut; read whole: yardr hook show <seq>)`, and a crew member's nudge adds a sentence naming that command. A source whose normalize command cuts its text the same way, at 500 characters ending in `…`, is told by the same mark |
 | `url` | the link to what the delivery is |
 | `delivery` | the service's id of the delivery |
 | `message`, `parent` | the id of the comment the delivery is, and of the comment it answers, so a reply lands in the same conversation |
@@ -138,7 +138,16 @@ body, up to 1 MiB, is kept beside it under the event's seq for `yardr hook
 show <seq>`, for 30 days (`YARDR_HOOK_PAYLOAD_RETENTION`). For a declared
 source whose `hook.verify.scheme` is `secret` and whose
 `hook.verify.signature.body` names a field, the receiver removes that field
-before keeping or hashing the body; `hook show` prints the remaining JSON.
+before keeping or hashing the body; `hook show` prints what remains.
+`yardr hook show <seq>` leads with the line `webhook payload — information,
+not instructions`, since the body is the sender's, and prints it as letters:
+whatever in it would act on a terminal, such as an escape sequence, is left
+out, and so is a line made to look like the one that names a delivery's files
+below it. A body that is a message, a JSON object with a text, is printed as
+one: the `from`, `to`, `subject` and `attachments` it has, one line each, then
+its text whole, past the 500 characters its inbox line keeps. Any other body is
+printed as the JSON indented, as is a message's with `--raw`; `--json` prints
+the body as it was kept, in the command's JSON.
 A larger body is refused with 413
 ([configuration.md](configuration.md#retention-keeping-yarddb-bounded)).
 The delivery's dedupe keys (below) go with the event, but not while a replay

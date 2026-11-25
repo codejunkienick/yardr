@@ -172,7 +172,7 @@ func (w *wtx) userIdentityStale(seq uint64, was, now AskRun) error {
 // ignore entry the mapping cleared beside it.
 func runUserIdentity(ctx context.Context, w *wtx, argv []string, actor string, by *approvedOn) (string, error) {
 	user, source, id, key := userIdentityOf(argv)
-	cleared, err := w.setUserIdentity(ctx, user, source, Identity{ID: id, Key: key}, actor, by)
+	cleared, _, err := w.setUserIdentity(ctx, user, source, Identity{ID: id, Key: key}, actor, by)
 	if err != nil {
 		return "", err
 	}

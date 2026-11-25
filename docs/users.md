@@ -1527,6 +1527,30 @@ source <depot> flow depot`), which leave the copy in the store, unused.
 `yardr user device rm` refuses the device's next request and undoes nothing
 that it wrote.
 
+**A stolen device of the operator can read what strangers sent, and every
+stored webhook body.** Until `yardr user device rm`, whoever holds its token
+can read the messages a mapping card holds while the card is open or put aside
+([api.md](api.md#identityheldpayloads)): what a sender no user maps wrote,
+kept beside the card until the operator answers it. It can read the stored
+body of any hook delivery too ([api.md](api.md#hookpayload)), with a declared
+body secret already taken out of it, until the body is pruned
+([configuration.md](configuration.md#retention-keeping-yarddb-bounded)). What
+the holder learns is what the senders wrote and the address or id each wrote
+it under, and whatever else those bodies carry; no credential of the yard's
+stands in either.
+
+Several things stand against it. A device of any other user is answered as for
+a method the yard does not have. The pane of a bead's agent is refused the
+first call on the yard's socket, and the bead and the queue an agent reads
+carry none of a held message, only how many wait. Both calls are taken only
+over https or from the yard's own machine, and, like a session's screen, down
+the link from the edge from a paired device of the operator. A plain call
+there is taken, so the edge, which reads the device's token with every plain
+call, reads the held messages and the bodies it sends back with it. A device
+sealed in place ([below](#sealed-in-place)) sends them as ciphertext the edge
+cannot read, so a person who does not trust the edge with a stranger's
+messages uses a sealed device, or reads them at the yard's own machine.
+
 **A write says how it came.** What a device writes carries the device's
 name: the event has `via` in its data, and wherever the writer is shown the
 mark stands behind the name, for a person and for an agent alike:

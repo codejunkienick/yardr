@@ -249,7 +249,12 @@ is answered as for a method the yard does not have.
 Teammates cross with them too: `Teammates` and `UninviteTeammate` are taken
 from a paired device of the operator down the link, as from the yard's own
 machine, so the operator's paired device reads the yard's teammates and
-files a removal through the edge.
+files a removal through the edge. So do the reads of what strangers sent:
+`IdentityHeldPayloads`, the messages a mapping card holds, and `HookPayload`,
+the stored body of a hook delivery. The edge reads a plain call and its reply
+with the device's token, so a person who does not trust the edge with those
+messages reads them from a sealed device, whose calls cross as ciphertext, or
+on the yard's own machine.
 The operator's own writes, a stage file's save and a copy of a depot's flows
 (`PutStageFile`, `CopyRepoFlows`), need no card and cross the link too. A
 hosted yard takes them from a paired device of the operator. Any other yard

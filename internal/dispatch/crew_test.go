@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"yardr.dev/yardr/internal/dispatch"
+	"yardr.dev/yardr/internal/hooks"
 	"yardr.dev/yardr/internal/store"
 	"yardr.dev/yardr/internal/storetest"
 )
@@ -2737,6 +2738,66 @@ func TestNudgeTypesASingleShortMailInline(t *testing.T) {
 			t.Fatalf("nudge = %q, want %q", nudge, want)
 		}
 	})
+}
+
+// A crew nudge says how to read a hook delivery whole when the text of one
+// of the unread was cut at hooks.MaxText, whether the core cut it or a pack's
+// normalize did before the core saw it, and says nothing of the kind for any
+// other: a text of another length, or a mail of that very length, which is no
+// hook delivery and is read whole from the inbox.
+func TestNudgeSaysHowToReadACutHookWhole(t *testing.T) {
+	t.Parallel()
+	const hint = " Read cut hook messages whole with yardr hook show <seq>."
+	cut := strings.Repeat("é", hooks.MaxText-1) + "…"
+	for _, c := range []struct {
+		name  string
+		hooks []string // the texts of the hook deliveries, in order
+		mail  string   // a mail after them, "" for none
+		want  bool
+	}{
+		{"cut by the core", []string{cut}, "", true},
+		{"cut by a pack, after a short one", []string{"deploy froze", strings.Repeat("a", hooks.MaxText-1) + "…"}, "", true},
+		{"cut and then a mail", []string{cut}, "thanks", true},
+		{"a rune short of the cut", []string{strings.Repeat("a", hooks.MaxText-2) + "…"}, "", false},
+		{"the length of the cut with no mark", []string{strings.Repeat("a", hooks.MaxText)}, "", false},
+		{"short", []string{"deploy froze"}, "", false},
+		{"a mail of the cut's length", nil, cut, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			s, own := storetest.NewOwned(t)
+			ctx := context.Background()
+			f := &crewRunner{status: map[string]string{}}
+			d := &dispatch.Dispatcher{Store: s, Runners: map[string]dispatch.Runner{"fake": f}, PromptSettle: -1, PromptWait: -1}
+			if _, err := s.PutCrew(ctx, store.CrewMember{Name: "yardmaster", Runner: "fake"}, "me"); err != nil {
+				t.Fatal(err)
+			}
+			must(t, s.AddSubscription(ctx, "yardmaster", store.Subscription{Source: "talk", Scope: store.ScopeAll}, "yardmaster"))
+			must(t, d.Reconcile(ctx))
+			must(t, d.Reconcile(ctx))
+			agent := agentOf(t, s)
+			f.set(agent, "idle")
+			for i, text := range c.hooks {
+				env := map[string]any{"source": "talk", "type": "message", "action": "create", "text": text}
+				if _, _, err := own.RecordHook(ctx, "talk", env, []byte(fmt.Sprintf(`{"n":%d}`, i)), []string{fmt.Sprintf("talk-%d", i)}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if c.mail != "" {
+				must(t, s.Mail(ctx, "yardmaster", c.mail, "chris"))
+			}
+			must(t, d.Reconcile(ctx))
+			if len(f.nudges) != 1 {
+				t.Fatalf("nudges = %q, want one", f.nudges)
+			}
+			if got := strings.Contains(f.nudges[0], hint); got != c.want {
+				t.Fatalf("the nudge %q holds the hint %q: %v, want %v", f.nudges[0], hint, got, c.want)
+			}
+			if !c.want && strings.Contains(f.nudges[0], "hook show") {
+				t.Fatalf("the nudge %q names yardr hook show where no text was cut", f.nudges[0])
+			}
+		})
+	}
 }
 
 // crewBarrierRunner is a crewRunner whose Status calls block until the

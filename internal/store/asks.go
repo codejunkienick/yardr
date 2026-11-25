@@ -155,17 +155,16 @@ type Ask struct {
 	Pair string `json:"pair,omitempty"`
 }
 
-// Answer is the JSON of a note of kind answer: what one person did with
-// one ask. Exactly one of a pick (Option), words alone (Words with no
-// Option, Later, Decline or TakeBack), Later, Decline, Given, Ran and
-// TakeBack is set, except a setup approval, which holds the picked preset
-// (Option), the names given (Given) or the candidate taken (Account), and
-// what the yard runs (Ran) together, written by ApproveSetup alone.
+// Answer is the JSON of a note of kind answer: what one person did with one
+// ask. Exactly one of a pick (Option), words alone (Words with none of the
+// rest), Later, Decline, Given, Ran and TakeBack is set, except a setup
+// approval, which holds the picked preset (Option), the names given (Given) or
+// the candidate taken (Account), and what the yard runs (Ran) together, written
+// by ApproveSetup alone.
 type Answer struct {
 	// Ask is the ask note's seq.
 	Ask uint64 `json:"ask"`
-	// Option is the picked option's number, 1-based into the ask's
-	// options, 0 for none.
+	// Option is the picked option's number, 1-based, 0 for none.
 	Option int `json:"option,omitempty"`
 	// Words go with a pick, answer an ask with no options, or say why a
 	// question is declined or taken back.
@@ -173,19 +172,18 @@ type Answer struct {
 	// Later puts the ask aside; Decline ends it with no option picked.
 	Later   bool `json:"later,omitempty"`
 	Decline bool `json:"decline,omitempty"`
-	// Given are the names a secret ask was given values for: all the
-	// answer says of them. Only GiveSecret writes it.
+	// Given are the names a secret ask was given values for. GiveSecret's alone.
 	Given []string `json:"given,omitempty"`
-	// Account is the candidate a setup approval took instead of typing:
-	// the picked source's name, "" for a typed account. Only ApproveSetup
-	// writes it, with Ran.
+	// Account is the candidate a setup approval took instead of typing: the
+	// picked source's name, "" for a typed one. ApproveSetup's, with Ran.
 	Account string `json:"account,omitempty"`
-	// Ran is the command an approved run ask ran, with what it printed. Only
-	// ApproveAsk writes it.
+	// Ran is what an approved run ask ran and printed. Only ApproveAsk writes it.
 	Ran *AskRan `json:"ran,omitempty"`
 	// TakeBack ends the ask as asked no more: the note's author is the asker
 	// or the operator, never the person asked. Only TakeBackAsk writes it.
 	TakeBack bool `json:"take_back,omitempty"`
+	// Delivered are the hook events a mapping pick released, which the yard writes.
+	Delivered []uint64 `json:"delivered,omitempty"`
 }
 
 // ParseAsk reads the ask a note of kind ask holds.
@@ -869,7 +867,7 @@ func (s *Store) recordAnswer(ctx context.Context, id string, ans Answer, actor s
 				continue
 			}
 			if ask.Identity != nil {
-				if err := w.answerMapping(ctx, row, ask, ans, actor, weighed); err != nil {
+				if err := w.answerMapping(ctx, row, note, ask, ans, actor, weighed); err != nil {
 					return err
 				}
 			}
@@ -900,14 +898,13 @@ func (s *Store) recordAnswer(ctx context.Context, id string, ans Answer, actor s
 	})
 }
 
-// answerShape refuses an answer that is not exactly one of a pick, words
-// alone, Later and Decline, whatever ask it names; id is the bead as the
-// refusal says it. Whether a decline needs words is the ask's to say
-// (answerable). Given is GiveSecret's to write: an answer that came with
-// it would say "gave" of a value no file holds. Ran is ApproveAsk's: an
-// answer that came with it would say the yard ran what it did not.
-// Account is ApproveSetup's, with Ran. TakeBack is TakeBackAsk's, which
-// asks who takes it back: here it would be anyone's.
+// answerShape refuses an answer that is not exactly one of a pick, words alone,
+// Later and Decline, whatever ask it names; id is the bead as the refusal says
+// it. Whether a decline needs words is the ask's to say (answerable). What the
+// yard alone records is refused from a caller, as it would say what did not
+// happen: Given is GiveSecret's ("gave" of a value no file holds), Ran
+// ApproveAsk's, Account ApproveSetup's with Ran, Delivered a mapping pick's,
+// and TakeBack TakeBackAsk's, which asks who takes it back.
 func answerShape(id string, ans *Answer) error {
 	ans.Words = strings.TrimSpace(ans.Words)
 	if ans.TakeBack {
@@ -921,6 +918,9 @@ func answerShape(id string, ans *Answer) error {
 	}
 	if ans.Ran != nil {
 		return fmt.Errorf("answer %d: a command is approved with yardr bead answer %s %d --approve, and what ran is recorded by the yard alone", ans.Ask, id, ans.Ask)
+	}
+	if len(ans.Delivered) > 0 {
+		return fmt.Errorf("answer %d: released deliveries are recorded by the yard alone", ans.Ask)
 	}
 	if ans.Ask == 0 {
 		return fmt.Errorf("an answer needs the ask: yardr bead answer %s <ask> <n> [words]", id)

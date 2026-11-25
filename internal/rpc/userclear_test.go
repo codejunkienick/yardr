@@ -108,6 +108,8 @@ func TestRefusalsGiveTheFixAfterOrInLowerCase(t *testing.T) {
 	for _, call := range []struct{ name, fix string }{
 		{"Teammates", here + "."},
 		{"UninviteTeammate", "file it on the yard's machine."},
+		{"IdentityHeldPayloads", "read them on the yard's machine."},
+		{"HookPayload", here + " (`yardr hook show <seq>`)."},
 		{"SourceGrants", here + " (`yardr source grants`)."},
 		{"SessionScreen", here + "."},
 		{"Line", here + "."},
@@ -126,12 +128,20 @@ func TestRefusalsGiveTheFixAfterOrInLowerCase(t *testing.T) {
 			})
 		}
 	}
-	t.Run("UninviteTeammate/down the link behind a proxy that says plain", func(t *testing.T) {
-		got := inTheClear(clearRequest(linkRemoteAddr, "http"), "UninviteTeammate", "", false, false, false)
-		if want := ", or file it on the yard's machine."; !strings.Contains(got, want) {
-			t.Errorf("the refusal is %q, want it to say %q", got, want)
-		}
-	})
+	// The calls that share the teammates' rule give the same fix down the link,
+	// where a proxy that says plain is the one refusal that has an "or".
+	for _, call := range []struct{ name, fix string }{
+		{"UninviteTeammate", "file it on the yard's machine."},
+		{"IdentityHeldPayloads", "read them on the yard's machine."},
+		{"HookPayload", here + " (`yardr hook show <seq>`)."},
+	} {
+		t.Run(call.name+"/down the link behind a proxy that says plain", func(t *testing.T) {
+			got := inTheClear(clearRequest(linkRemoteAddr, "http"), call.name, "", false, false, false)
+			if want := ", or " + call.fix; !strings.Contains(got, want) {
+				t.Errorf("the refusal is %q, want it to say %q", got, want)
+			}
+		})
+	}
 	for _, call := range []struct{ name, sentence string }{
 		{"SourceGrants", "Read it on the yard's machine (`yardr source grants`)."},
 		{"TelemetryShow", "Read it on the yard's machine (`yardr telemetry show`)."},

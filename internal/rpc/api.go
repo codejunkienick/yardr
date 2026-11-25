@@ -232,6 +232,21 @@ var listenerOnly = map[string]bool{
 // hosted yard and, on any other, in a call that came sealed alone
 // (stageWriteInTheClear). What they write says it came by the device (via).
 //
+// IdentityHeldPayloads reads the bodies a mapping card holds: the deliveries
+// of a sender no user maps, kept beside the card until its answer, open or put
+// aside. It is the person's it asks to read, and no one else's; Bead and
+// UserAsks leave the bodies out, because agents and the whole queue read those
+// before the person picks. Once the card is answered a body is a hook event,
+// which its answer names (`delivered` on the ask of Bead and UserAsks) and
+// HookPayload reads. HookPayload reads the stored body of one hook event, as
+// `yardr hook show <seq>` does, with a declared body secret removed; on the
+// socket it is any caller's read, and here it is the operator's, since a
+// delivery is the sender's words. The operator's device token goes with the
+// request, so the listener takes both only over https or from the yard's own
+// machine, and down the link from the edge from a paired device of the
+// operator, as an approval. A call that came down the link plain lets the edge
+// read the reply with the token; one that came sealed it cannot read.
+//
 // DevicePairOpen opens a pairing for one device of one user, as `yardr
 // user device pair` does, and answers its code and expiry;
 // DevicePairState reads a directly opened pairing back with its code and
@@ -244,22 +259,24 @@ var listenerOnly = map[string]bool{
 // answers each as a method the yard does not have, down the yard link
 // from the edge alike (UserServer.operatorCall).
 var OperatorCalls = map[string][]string{
-	"GiveSecret":       {"bead", "ask", "values", "actor", "weighed"},
-	"ApproveAsk":       {"bead", "ask", "actor", "weighed", "values"},
-	"ApproveSetup":     {"bead", "ask", "option", "values", "account", "actor", "weighed", "host", "site"},
-	"SourceGrants":     {"source"},
-	"SessionScreen":    {"session"},
-	"Line":             {"depot"},
-	"Prime":            {"crew"},
-	"Teammates":        {},
-	"UninviteTeammate": {"user", "actor"},
-	"TelemetryShow":    {},
-	"TelemetrySet":     {"on", "actor"},
-	"PutStageFile":     {"flow", "stage", "text", "expect_digest", "actor", "weighed"},
-	"CopyRepoFlows":    {"depot", "actor", "weighed"},
-	"DevicePairOpen":   {"user", "name", "actor"},
-	"DevicePairState":  {},
-	"DevicePairClose":  {"actor"},
+	"GiveSecret":           {"bead", "ask", "values", "actor", "weighed"},
+	"ApproveAsk":           {"bead", "ask", "actor", "weighed", "values"},
+	"ApproveSetup":         {"bead", "ask", "option", "values", "account", "actor", "weighed", "host", "site"},
+	"SourceGrants":         {"source"},
+	"SessionScreen":        {"session"},
+	"Line":                 {"depot"},
+	"Prime":                {"crew"},
+	"Teammates":            {},
+	"UninviteTeammate":     {"user", "actor"},
+	"TelemetryShow":        {},
+	"TelemetrySet":         {"on", "actor"},
+	"PutStageFile":         {"flow", "stage", "text", "expect_digest", "actor", "weighed"},
+	"CopyRepoFlows":        {"depot", "actor", "weighed"},
+	"IdentityHeldPayloads": {"bead", "ask", "actor"},
+	"HookPayload":          {"seq"},
+	"DevicePairOpen":       {"user", "name", "actor"},
+	"DevicePairState":      {},
+	"DevicePairClose":      {"actor"},
 }
 
 // socketOnly are the calls of OperatorCalls the listener serves to no

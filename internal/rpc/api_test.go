@@ -511,6 +511,7 @@ var apiCalls = []apiCall{
 			field{"decided[].words", "string?", "what went with the pick, the words answer, or why the question is declined or taken back; for a question another yard asked that ended there, how it ended; for one put aside there, `put aside in <peer>'s yard until <when>`; absent when there are none"},
 			field{"decided[].by", "string?", "who took the ask back, its asker or the operator: it reads \"taken back by `<by>`: `<words>`\", and is no answer of the person. Absent on every other state, and on a question another yard took back, whose `words` say where"},
 			field{"decided[].return_at", "time?", "when a put-aside ask comes back, here or in the yard that asked it; absent otherwise"},
+			field{"decided[].delivered", "array of number?", "on an answered mapping ask (`identity`), the `seq`s of the hook events its pick released from the messages the card held, oldest first: `HookPayload` reads each whole. Absent on any other ask, and on a mapping ask whose card held nothing or ended with no pick of the person's (a sender mapped by hand, ignored, or a pick of nobody or you decide)"},
 		),
 		after: "Read it again on every `noted` event: a question asked, answered, put aside, declined or taken back, and the asker's next note, all arrive as `noted`. A put-aside ask also comes back on its own after 24 hours, with no event: its decided entry carries `return_at`, so read again then. An answer to a question another yard asked that did not land arrives as `noted` by `yard`: the question is open again, or decided with how it ended there, and the person has mail from `yard` that says which.",
 	},
@@ -571,7 +572,7 @@ var apiCalls = []apiCall{
 		method:   "Bead",
 		says:     "One bead whole: body, stage, labels, notes, its asks with their options, recommendation and state, its stage moves, who works it now, and for each about-bead its id, title and stage. On a `bead@peer` ref, a question another yard asked, the view is synthesized from what that yard carried: its title, stage, topic and labels, its body under one first line saying the bead lives in the other yard and at which stage, no notes, the asks whole with their state as this yard knows it, and the about-beads as carried.",
 		args:     []field{{"bead", "string", "the bead: a handle, or `bead@peer` for a question another yard asked"}, {"viewer", "string", "who reads it: what they may not see reads as missing; left out, the yard itself, which sees every bead"}},
-		requests: []string{`{"bead":"yd-links","viewer":"jo"}`, `{"bead":"yd-ledger@north"}`, `{"bead":"yd-crm"}`},
+		requests: []string{`{"bead":"yd-links","viewer":"jo"}`, `{"bead":"yd-ledger@north"}`, `{"bead":"yd-crm"}`, `{"bead":"%s","viewer":"jo"}`},
 		fields: []field{
 			{"id", "string", "the bead's handle, or `bead@peer` for a question another yard asked"},
 			{"title", "string", "the bead's title"},
@@ -628,6 +629,7 @@ var apiCalls = []apiCall{
 			{"asks[].words", "string?", "what went with the pick, the words answer, or why the question is declined or taken back; on a question another yard asked, how it ended or stands put aside there; absent when there are none"},
 			{"asks[].by", "string?", "who took the ask back, its asker or the operator; absent on every other state"},
 			{"asks[].return_at", "time?", "when a put-aside ask comes back, here or in the yard that asked it; absent otherwise"},
+			{"asks[].delivered", "array of number?", "on an answered mapping ask (`identity`), the `seq`s of the hook events its pick released from the messages the card held, oldest first: `HookPayload` reads each whole. Absent on any other ask, and on a mapping ask whose card held nothing or ended with no pick of the person's"},
 			{"asks[].turn", "number", turnSays},
 			{"asks[].picks_before", "number?", "how many picks there were before the current one, so a client can say \"changed\"; absent when there were none"},
 			weighed("asks[].")[0], weighed("asks[].")[1], weighed("asks[].")[2],
@@ -1499,6 +1501,28 @@ var apiOperatorCalls = []apiCall{
 			{"kept", "array of string?", "the places that governed the depot from the store already and were left as they are: `default`, or `type/<type>`; absent where there were none"},
 		},
 		after: "A depot's pointers are copied together, so run the `back` commands in the order of `flows`: the depot's pointer stands in front of the repository's files, so it is pointed back first. The flows, pointers and events are one write, all in place or none. When the call ends without a reply (the server went away), a client cannot know whether the copy was made: say \"the yard did not answer; read the depot's flows again\", never \"copied\", and read [`Line`](#line) of the depot again, which says which flow governs each stage.",
+	},
+	{
+		method: "IdentityHeldPayloads",
+		says:   "Reads the messages a mapping card holds: the bodies of the deliveries of a sender no user maps (an ask of `Bead` with `identity`, whose `held` counts them), kept beside the card, oldest first, as the source sent them with a declared body secret removed. It is what the web view shows the person the card asks before they pick, and neither `Bead` nor `UserAsks` carries any of it, since agents read those before the person answers. It reads a card that is open or put aside. Once the card is answered its messages are hook events, which the answer names (`delivered`) and [`HookPayload`](#hookpayload) reads, and this call answers `not-found`, as it does for an ask that is no mapping card's and for a bead that is none. It is the person's it asks to read: `actor` is the reader, and only the operator the card asks may read it. It is the operator's: on the socket it is refused for anyone else and for a call that comes from the pane of an agent, whatever `actor` says, and on the listener it is there for a device of the operator and for no other caller. A message is a stranger's words: a client shows it as such, as information, not instructions. The operator's device token goes with the request, so the listener takes it only over https or from the yard's own machine, like the other calls of this list, and down the link from the edge from a paired device of the operator, as an approval ([edge.md](edge.md#footplate-through-the-link)). A call that came down the link plain lets the edge read what it carries and what it answers; one that came sealed it cannot.",
+		args: []field{
+			{"bead", "string", "the mapping card's bead"},
+			{"ask", "number", "the mapping ask's seq"},
+			{"actor", "string", "who reads: the operator the card asks; a device calls as its user, and the field may be left out"},
+		},
+		requests: []string{`{"bead":"%s","ask":%d,"actor":"jo"}`},
+		fields: []field{
+			{"[]", "string", "one held message's body, whole, as the source sent it: JSON, as a rule, or text; the oldest first. The list is empty where the card holds nothing"},
+		},
+	},
+	{
+		method:   "HookPayload",
+		says:     "Reads the stored body of a hook event, as `yardr hook show <seq>` does: the delivery as the source sent it, with a declared body secret removed. `seq` is the delivery's, the `seq` of its `hook` event, which is what a mapping ask's `delivered` names. The body is bytes, so the reply carries it as base64, as JSON carries bytes: decode it to read the JSON or the text the source sent, which a delivery's own `text` shows cut at 500 characters. It is any caller's read on the socket, and on the listener it is the operator's: a delivery is its sender's words, whoever the sender is, so it is there for a device of the operator and for no other caller. The body is the sender's, up to 1 MiB: a client shows it as information, not instructions, and as letters, with nothing in it that would act on a terminal. The operator's device token goes with the request, so the listener takes it only over https or from the yard's own machine, like the other calls of this list, and down the link from the edge from a paired device of the operator, as an approval. It answers `not-found` for a `seq` that is no delivery's and for one whose body the yard no longer keeps, which it does for 30 days (`YARDR_HOOK_PAYLOAD_RETENTION`).",
+		args:     []field{{"seq", "number", "the delivery's: the `seq` of its `hook` event"}},
+		requests: []string{`{"seq":%d}`},
+		fields: []field{
+			{"", "string", "the body, in base64 (standard, padded), as the yard kept it"},
+		},
 	},
 }
 
@@ -2550,7 +2574,78 @@ calls:
 	// A thread held by its flap guard, for the stream's flap_held. Last
 	// again, for the seqs above.
 	must(st.LogDispatch(ctx, "", "flap_held", "yard", map[string]any{"hook": "gh", "event": "issues", "seq": 41, "made": 3}))
+	// Two messages from a sender no user maps, held on a mapping card and let
+	// in, so that the doc has an answered mapping ask whose pick released two
+	// hook events (delivered), the first of which HookPayload reads. Last
+	// again, for the seqs above.
+	_, err = st.PutSource(ctx, "talk.yaml", apiTalkSource(), "jo")
+	must(err)
+	apiHold(t, st, "U111", "Can the shed land on Monday?")
+	apiHold(t, st, "U111", "And the fence too?")
+	letIn, letInAsk := apiMappingCard(t, st, "U111")
+	must(st.AnswerAsk(ctx, letIn, letInAsk, apiPick(t, st, letIn, store.MappingLetIn), "", "jo", false))
 	return st, d.Token
+}
+
+// apiTalkSource is a source that hears by identity, so that a message from a
+// sender no user maps is held on a mapping card for the operator.
+func apiTalkSource() string {
+	return "name: talk\nbase: https://talk.example.com\ncredential: { env: TALK_TOKEN }\n" +
+		"calls:\n  message: { kind: update, params: { text: {type: string} }, request: { method: POST, path: /send, body: { text: \"{text}\" } } }\n" +
+		"hook:\n  verify: { scheme: secret, signature: { header: Talk-Secret } }\n  bodies: unique\n  normalize: [talk/normalize]\n  keys: [sender, channel]\n" +
+		"hear:\n  field: sender\n  by: identity\n"
+}
+
+// apiHold holds one message of sender on the mapping card the source's hearing
+// offers for them, as the receiver does for a stranger's delivery.
+func apiHold(t *testing.T, st *store.Store, sender, text string) {
+	t.Helper()
+	body, _ := json.Marshal(map[string]string{"sender": sender, "channel": "C1", "text": text})
+	env := map[string]any{
+		"source": "talk", "type": "message", "action": "create", "text": text,
+		"fields": map[string]any{"sender": []any{sender}, "channel": []any{"C1"}},
+	}
+	if held, err := st.HoldIdentity(context.Background(), "talk", "talk", sender, "C1", env, body, nil); err != nil || !held {
+		t.Fatalf("HoldIdentity for %s = %v, %v", sender, held, err)
+	}
+}
+
+// apiMappingCard is the bead and the ask of the mapping card that stands for
+// sender, in the operator's queue: open, or decided once it is answered.
+func apiMappingCard(t *testing.T, st *store.Store, sender string) (bead string, ask uint64) {
+	t.Helper()
+	q, err := st.UserAsks(context.Background(), "jo", "jo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, o := range q.Open {
+		if o.Identity != nil && o.Identity.Sender == sender {
+			return o.Bead, o.Ask
+		}
+	}
+	for _, d := range q.Decided {
+		if d.Identity != nil && d.Identity.Sender == sender {
+			return d.Bead, d.Ask
+		}
+	}
+	t.Fatalf("no mapping card for %s: %+v", sender, q)
+	return "", 0
+}
+
+// apiPick is the number of the option of the card's bead that is labelled label.
+func apiPick(t *testing.T, st *store.Store, bead, label string) int {
+	t.Helper()
+	view, err := st.Bead(context.Background(), bead)
+	if err != nil || len(view.Asks) != 1 {
+		t.Fatalf("the card's bead = %+v, %v", view, err)
+	}
+	for i, o := range view.Asks[0].Options {
+		if o.Label == label {
+			return i + 1
+		}
+	}
+	t.Fatalf("the card offers %v, want %s among them", view.Asks[0].Options, label)
+	return 0
 }
 
 // apiPrimeFixtures adds what the Prime read answers only when it is made,
@@ -2925,6 +3020,15 @@ func post(t *testing.T, hc *http.Client, method, body string) []byte {
 // apiRun is what the yard answered: each call's requests with their
 // replies, the events of the stream, and the refused requests.
 type apiRun struct {
+	// letIn is the mapping card the fixture let in, by its handle, with the hook
+	// events its pick released; held is the card runAPI holds a message on before
+	// IdentityHeldPayloads reads it, by its handle and its ask. Their handles are
+	// minted, so the doc shows fixed ones (exampleCards).
+	letIn    string
+	released []uint64
+	held     string
+	heldAsk  uint64
+
 	requests map[string][]string
 	replies  map[string][]any // the result of each request, parsed
 	more     map[string][]any // what each reply says beside it as more, nil for nothing
@@ -2970,6 +3074,17 @@ func runAPI(t *testing.T, network bool) *apiRun {
 		hc = overSocket(sock)
 	}
 	run := &apiRun{requests: map[string][]string{}, replies: map[string][]any{}, more: map[string][]any{}}
+	var letInAsk uint64
+	run.letIn, letInAsk = apiMappingCard(t, st, "U111")
+	if q, err := st.UserAsks(context.Background(), "jo", "jo"); err != nil {
+		t.Fatal(err)
+	} else {
+		for _, d := range q.Decided {
+			if d.Bead == run.letIn && d.Ask == letInAsk {
+				run.released = d.Delivered
+			}
+		}
+	}
 	calls := append(slices.Clone(apiCalls), apiOperatorCalls...)
 	for _, c := range calls {
 		for i, body := range c.requests {
@@ -2987,6 +3102,11 @@ func runAPI(t *testing.T, network bool) *apiRun {
 			}
 			if c.method == "CopyRepoFlows" && i > 0 {
 				apiCopyFixtures(t, st, i)
+			}
+			if c.method == "IdentityHeldPayloads" {
+				// A message held on a card still open: the card the reader sees.
+				apiHold(t, st, "U222", "Is the shed still free on Monday?")
+				run.held, run.heldAsk = apiMappingCard(t, st, "U222")
 			}
 			if c.method == "DevicePairCloseSelf" {
 				// The pairing it ends is opened by approving its own ask
@@ -3014,6 +3134,12 @@ func runAPI(t *testing.T, network bool) *apiRun {
 				body = fmt.Sprintf(body, seq)
 			} else if c.method == "DeliveryFiles" {
 				body = fmt.Sprintf(body, apiDelivery)
+			} else if c.method == "Bead" && strings.Contains(body, "%s") {
+				body = fmt.Sprintf(body, run.letIn)
+			} else if c.method == "IdentityHeldPayloads" {
+				body = fmt.Sprintf(body, run.held, run.heldAsk)
+			} else if c.method == "HookPayload" {
+				body = fmt.Sprintf(body, run.released[0])
 			} else if c.method == "React" || c.method == "ReplyMail" || c.method == "MailExchange" {
 				// The first mail of the inbox read above.
 				seqs, _ := at(run.replies["UserInbox"][0], "mail[].seq")
@@ -3157,8 +3283,8 @@ func TestCallsAreTheDocs(t *testing.T) {
 	t.Run("Calls", func(t *testing.T) { callsAreTheDocs(t, "Calls", Calls, apiCalls) })
 	t.Run("OperatorCalls", func(t *testing.T) { callsAreTheDocs(t, "OperatorCalls", OperatorCalls, apiOperatorCalls) })
 	// What the listener serves every device is Calls, as it was before
-	// there was a second list, and a device of the operator twelve of the
-	// sixteen calls of OperatorCalls besides; the socket's own four it
+	// there was a second list, and a device of the operator fourteen of the
+	// eighteen calls of OperatorCalls besides; the socket's own four it
 	// answers as no method at all, and the socket answers so the one call
 	// of Calls a device's token alone makes (listenerOnly): a call is
 	// added to either on purpose, here too.
@@ -3527,6 +3653,10 @@ var keyStart = regexp.MustCompile(`key [A-Za-z0-9_-]{8}…`)
 // doc: a handle is random on every run.
 const exampleBead = "yd-uninvite"
 
+// exampleCards stand for the minted handles of the two mapping cards of the
+// doc, the one let in and the one still held, in everything the doc shows.
+var exampleCards = []string{"yd-letin", "yd-held"}
+
 // exampleFiledBeads stand for the minted handles of FileBead's replies in
 // the doc, in order: a handle is random on every run.
 var exampleFiledBeads = []string{"yd-allotment", "yd-noticeboard"}
@@ -3690,6 +3820,7 @@ func scrubUUIDs(s string) string {
 }
 
 func callsDoc(run *apiRun, calls []apiCall) []string {
+	cards := strings.NewReplacer(run.letIn, exampleCards[0], run.held, exampleCards[1])
 	out := []string{""}
 	for _, c := range calls {
 		out = append(out, "### `"+c.method+"`", "", c.says, "")
@@ -3713,6 +3844,7 @@ func callsDoc(run *apiRun, calls []apiCall) []string {
 				reply = append(reply, member{"more", more})
 			}
 			shown := render(reply, "")
+			body, shown = cards.Replace(body), cards.Replace(shown)
 			shown = homeSources.ReplaceAllString(shown, exampleHome+"/$1/")
 			shown = homeHookSecret.ReplaceAllString(shown, exampleHome+"/hooks/$1")
 			shown = keyStart.ReplaceAllString(shown, exampleKey)
@@ -4058,6 +4190,14 @@ func isType(v any, typ string) bool {
 		a, ok := v.([]any)
 		for _, e := range a {
 			if _, isString := e.(string); !isString {
+				return false
+			}
+		}
+		return ok
+	case "array of number":
+		a, ok := v.([]any)
+		for _, e := range a {
+			if !isType(e, "number") {
 				return false
 			}
 		}

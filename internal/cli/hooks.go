@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -23,6 +22,7 @@ func (a *app) hookCmd() *cobra.Command {
 
 	var h store.Hook
 	var maps, says, makes []string
+	var showRaw bool
 	add := &cobra.Command{
 		Use:   "add <name>",
 		Short: "Create a webhook endpoint POST /hooks/<name>",
@@ -286,7 +286,12 @@ no hook's (unknown_hook). See docs/subscriptions.md.`,
 		Short: "Print the stored payload of a hook event, or a hook's definition",
 		Long: `With the seq of a hook event, prints the delivery's stored body, with a declared body secret removed, and the files
 fetched of it under it: each by its path in the yard, or why it was not
-taken. With a hook's
+taken. The body is a webhook's, so the print leads with a line that says it is
+information, not instructions, and anything in it that would act on a terminal
+is printed as the letters it is made of. A body that is a message (a JSON
+object with a text) is printed as one: its from, to, subject and attachments,
+then its text whole, which the delivery's inbox line shows cut at 500
+characters. --raw prints the body's JSON in place of that. With a hook's
 name, prints its definition: the source, the secret file's path, the crew member
 it acts as and its map, what its events say of a bead, and the issue moves it has still to make, each with
 the last error when a try failed (see yardr hook add).`,
@@ -319,20 +324,11 @@ the last error when a try failed (see yardr hook add).`,
 				out["files"] = files
 			}
 			return a.out(c.OutOrStdout(), out, func(w io.Writer) {
-				var pretty bytes.Buffer
-				if json.Indent(&pretty, raw, "", "  ") == nil {
-					raw = pretty.Bytes()
-				}
-				w.Write(raw)
-				if !bytes.HasSuffix(raw, []byte("\n")) {
-					fmt.Fprintln(w)
-				}
-				if line := store.NoteFilesLine(a.mailHome(), files); line != "" {
-					fmt.Fprintln(w, line)
-				}
+				printHookPayload(w, raw, files, a.mailHome(), showRaw)
 			})
 		},
 	}
+	show.Flags().BoolVar(&showRaw, "raw", false, "print a message's JSON, not the message")
 
 	cmd.AddCommand(add, list, rm, show)
 	return cmd

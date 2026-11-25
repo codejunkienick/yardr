@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"fmt"
+
 	"yardr.dev/yardr/internal/hooks"
 	"yardr.dev/yardr/internal/store"
 )
@@ -15,4 +17,15 @@ import (
 func hookCue(data map[string]any) bool {
 	speaker := hookSpeaker(data)
 	return speaker == store.SpeakerOutside || store.SpeakerIsForeign(speaker) || hooks.Outsider(data)
+}
+
+// hookCutSuffix is what an inbox line says after a delivery's text when the
+// text was cut (hooks.TextCut): that it was, and the command that prints the
+// whole of it from the stored body. "" for a text that was not, so a line
+// that never needed it reads as it did.
+func hookCutSuffix(seq uint64, text string) string {
+	if !hooks.TextCut(text) {
+		return ""
+	}
+	return fmt.Sprintf(" (cut; read whole: yardr hook show %d)", seq)
 }

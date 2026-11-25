@@ -152,7 +152,7 @@ func (w *wtx) setPeerIdentity(ctx context.Context, name string, id PeerIdentity,
 	if _, err := w.clearIgnored(id.Source, id.ID, actor, by); err != nil {
 		return nil, err
 	}
-	if err := w.retireMappingCards(id.Source, func(sender string) bool { return id.IsIn(id.Source, sender) }, id.Speaker(name), actor); err != nil {
+	if _, err := w.retireMappingCards(id.Source, func(sender string) bool { return id.IsIn(id.Source, sender) }, id.Speaker(name), actor); err != nil {
 		return nil, err
 	}
 	return p, outboxOf(w.Tx, p)

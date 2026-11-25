@@ -131,9 +131,10 @@ func heldList(tx *bolt.Tx, uuid string) ([]HeldDelivery, error) {
 	return out, nil
 }
 
-// IdentityHeldPayloads reads the raw bodies waiting on one open identity
-// card, only for the person it asks. Bead and UserAsks leave the bodies out,
-// because agents and the whole queue read those before the person picks.
+// IdentityHeldPayloads reads the raw bodies waiting on one identity card, open
+// or put aside (a put-aside card keeps what it holds), only for the person it
+// asks. Bead and UserAsks leave the bodies out, because agents and the whole
+// queue read those before the person picks.
 func (s *Store) IdentityHeldPayloads(ctx context.Context, bead string, askSeq uint64, actor string) ([]string, error) {
 	var out []string
 	err := s.read(func(tx *bolt.Tx) error {
@@ -147,7 +148,7 @@ func (s *Store) IdentityHeldPayloads(ctx context.Context, bead string, askSeq ui
 		}
 		var target string
 		for _, resolved := range ResolveAsks(notes, now()) {
-			if resolved.Note.Seq == askSeq && resolved.AskErr == nil && resolved.Ask.Identity != nil && resolved.State == AskOpen {
+			if resolved.Note.Seq == askSeq && resolved.AskErr == nil && resolved.Ask.Identity != nil && (resolved.State == AskOpen || resolved.State == AskAside) {
 				target = resolved.Ask.To
 				break
 			}
@@ -304,18 +305,21 @@ func (w *wtx) syncHeldCount(uuid string) error {
 // kept delivery is (delivered, the write RecordHook shares), in
 // arrival order, and clears what waited. A delivery whose dedupe key
 // an earlier release already recorded is skipped, as a redelivery of
-// a kept one is. The card's count is synchronized after release.
-func (w *wtx) deliverHeld(uuid, speaker string) error {
+// a kept one is. The card's count is synchronized after release. It
+// answers the seq of each event it made, in that order, so the answer
+// that released them can name them (recordDelivered).
+func (w *wtx) deliverHeld(uuid, speaker string) ([]uint64, error) {
 	held, err := heldList(w.Tx, uuid)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if len(held) == 0 {
-		return w.syncHeldCount(uuid)
+		return nil, w.syncHeldCount(uuid)
 	}
 	if err := putHeld(w.Tx, uuid, nil); err != nil {
-		return err
+		return nil, err
 	}
+	var seqs []uint64
 	seen := w.Bucket(bHookSeen)
 	for _, h := range held {
 		duplicate := false
@@ -334,25 +338,26 @@ func (w *wtx) deliverHeld(uuid, speaker string) error {
 		stampHeldSpeaker(data, speaker)
 		seq, err := w.delivered("hook:"+h.Hook, data)
 		if err != nil {
-			return err
+			return nil, err
 		}
+		seqs = append(seqs, seq)
 		at := now()
 		for _, k := range h.Dedupe {
 			if err := seen.Put([]byte(k), seenValue(seq, at)); err != nil {
-				return err
+				return nil, err
 			}
 		}
 		var hook Hook
 		if ok, err := get(w.Tx, bHooks, h.Hook, &hook); err != nil {
-			return err
+			return nil, err
 		} else if ok {
 			hook.Accepted = &at
 			if err := put(w.Tx, bHooks, h.Hook, hook); err != nil {
-				return err
+				return nil, err
 			}
 		}
 		if err := w.Bucket(bHookPayloads).Put([]byte(seqKey(seq)), h.Payload); err != nil {
-			return err
+			return nil, err
 		}
 		// Its files are fetched after this write, as a kept delivery's
 		// are after its answer: they were the stranger's until now, so
@@ -361,7 +366,42 @@ func (w *wtx) deliverHeld(uuid, speaker string) error {
 			w.heldFiles = append(w.heldFiles, heldFileFetch{hook: h.Hook, seq: seq, files: files})
 		}
 	}
-	return w.syncHeldCount(uuid)
+	return seqs, w.syncHeldCount(uuid)
+}
+
+// recordDelivered puts the seqs of the hook events a mapping answer released
+// (deliverHeld) on that answer, as Answer.Delivered, so that whoever reads the
+// card afterwards can open each delivery whole (HookPayload). The answer is
+// recorded before the pick that releases them is made (answerMapping), so the
+// seqs, which only the release knows, are written onto the note after it, in
+// the same write; the note is rewritten in place, as syncHeldCount rewrites
+// the ask, with no new note and no event. It is the stored note that is read
+// and written, not the copy addAnswerNote answered: that one names the bead by
+// its handle where the store keeps its uuid. A release that made no event, a
+// card that held nothing or whose deliveries were all kept already, writes
+// nothing.
+func (w *wtx) recordDelivered(row *beadRow, note *Note, seqs []uint64) error {
+	if len(seqs) == 0 {
+		return nil
+	}
+	key := join(row.UUID, seqKey(note.Seq))
+	var stored Note
+	if ok, err := get(w.Tx, bNotes, key, &stored); err != nil {
+		return err
+	} else if !ok {
+		return fmt.Errorf("answer %d on %s: %w", note.Seq, row.ID, ErrNotFound)
+	}
+	ans, err := ParseAnswer(stored)
+	if err != nil {
+		return err
+	}
+	ans.Delivered = seqs
+	text, err := json.Marshal(ans)
+	if err != nil {
+		return err
+	}
+	stored.Text = string(text)
+	return put(w.Tx, bNotes, key, stored)
 }
 
 // stampHeldSpeaker records speaker on the held envelope's fields, as

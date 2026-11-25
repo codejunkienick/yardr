@@ -239,7 +239,7 @@ func (s *Store) SetIdentity(ctx context.Context, name, source string, id Identit
 	}
 	if user {
 		return s.write(func(w *wtx) error {
-			_, err := w.setUserIdentity(ctx, name, source, id, actor, nil)
+			_, _, err := w.setUserIdentity(ctx, name, source, id, actor, nil)
 			return err
 		})
 	}
@@ -248,46 +248,46 @@ func (s *Store) SetIdentity(ctx context.Context, name, source string, id Identit
 	})
 }
 
-// setUserIdentity is SetIdentity for a user inside the transaction, so
-// that a mapping pick and an approved run ask write the identity in the
-// write that records them: by is then the ask it was answered or
-// approved on, which the event carries, nil for a change typed in a
-// terminal. Mapping an id clears it from the source's ignore list in
-// the same write, so a mapped user is never also ignored; it answers
-// each entry it cleared. It also ends the mapping cards that ask who
-// the sender is (retireMappingCards), so no card stays open for a
-// sender who is mapped. Removing an identity clears nothing: an id
-// mapped and then removed stays un-ignored, and is heard as unmapped.
-func (w *wtx) setUserIdentity(ctx context.Context, name, source string, id Identity, actor string, by *approvedOn) ([]string, error) {
+// setUserIdentity is SetIdentity for a user inside the transaction, so that a
+// mapping pick and an approved run ask write the identity in the write that
+// records them: by is then the ask it was answered or approved on, which the
+// event carries, nil for a change typed in a terminal. Mapping an id clears it
+// from the source's ignore list in the same write, so a mapped user is never
+// also ignored; it answers each entry it cleared. It also ends the mapping
+// cards that ask who the sender is (retireMappingCards), so no card stays open
+// for a sender who is mapped, and answers, by card, the events delivering what
+// they held made. Removing an identity clears nothing: an id mapped and then
+// removed stays un-ignored, and is heard as unmapped.
+func (w *wtx) setUserIdentity(ctx context.Context, name, source string, id Identity, actor string, by *approvedOn) ([]string, map[string][]uint64, error) {
 	u, err := getUser(w.Tx, name)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := w.may(ctx, actor, ActIdentify, Object{Kind: KindUser, Name: name}); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	id.Key = foldIdentityKey(w.Tx, source, id.Key)
 	if err := checkUserIdentityOneToOne(w.Tx, name, source, id); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	before := cloneUser(u)
 	kind, data, err := setIdentityIn(&u.Identities, name, source, id, "user", "user")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if by != nil {
 		data["approved"] = by
 	}
 	if err := put(w.Tx, bUsers, name, u); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := w.event("", kind, actor, data); err != nil {
-		return nil, err
+		return nil, nil, err
 	} else if err := w.tellUserStale(name, before, u, actor); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if id.zero() {
-		return nil, nil
+		return nil, nil, nil
 	}
 	var cleared []string
 	for _, held := range []string{id.ID, id.Key} {
@@ -295,17 +295,17 @@ func (w *wtx) setUserIdentity(ctx context.Context, name, source string, id Ident
 			continue
 		}
 		if ok, err := w.clearIgnored(source, held, actor, by); err != nil {
-			return nil, err
+			return nil, nil, err
 		} else if ok {
 			cleared = append(cleared, held)
 		}
 	}
-	// A sender is named by the id or by the key, which matches in any case
-	// (Identity.is), as hearing reads it.
-	if err := w.retireMappingCards(source, id.is, name, actor); err != nil {
-		return nil, err
+	// A sender is named by the id or the key, matched in any case (Identity.is).
+	delivered, err := w.retireMappingCards(source, id.is, name, actor)
+	if err != nil {
+		return nil, nil, err
 	}
-	return cleared, nil
+	return cleared, delivered, nil
 }
 
 // clearIgnored drops the sender id from the source's ignore list where

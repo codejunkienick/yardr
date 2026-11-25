@@ -51,14 +51,14 @@ import (
 // it fit to stand on a port that may face the internet:
 //
 //   - only the calls of Calls, by name: every other method of the store, and
-//     the array form yardr's own builds use, is answered as not there. Twelve
-//     of OperatorCalls are there besides, for a device of an operator alone:
-//     GiveSecret, ApproveAsk, ApproveSetup, SourceGrants, SessionScreen, Line,
-//     Teammates, UninviteTeammate, TelemetryShow, TelemetrySet, PutStageFile
-//     and CopyRepoFlows (operatorCall), and GiveSecret for a device of a user
-//     whose own address or credential is asked for (ownSecret). The other
-//     four, DevicePairOpen, DevicePairState, DevicePairClose and Prime, are
-//     the socket's alone (socketOnly): none opens a pairing or reads a role;
+//     the array form yardr's own builds use, is answered as not there.
+//     Calls of OperatorCalls not in socketOnly are there for operator
+//     devices (operatorCall). GiveSecret and ApproveAsk also have narrow
+//     paths for a user's own secret and pairing approval
+//     (ownSecret, ownPairApproval). The four socket-only calls,
+//     DevicePairOpen, DevicePairState, DevicePairClose and Prime, are not
+//     served to a device (socketOnly): none opens a pairing or reads
+//     a role;
 //   - every call is made as the user the credential resolves to (asUser);
 //   - Settings answers the keys of the store's device settings and no
 //     other, and the stream carries the value of a setting_changed for

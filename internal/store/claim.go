@@ -588,17 +588,21 @@ func (w *wtx) closeCard(row *beadRow, reason, actor string) error {
 // waiting ask counts as pending (mappingPending), so closing the bead alone
 // would leave the card among their questions and block a fresh card for
 // the sender once the mapping is removed. An ask that ended already,
-// answered or declined, is left as it is.
-func (w *wtx) retireMappingCards(source string, is func(sender string) bool, who, actor string) error {
+// answered or declined, is left as it is. It answers, by the uuid of each card
+// it ended, the seqs of the hook events that delivering what the card held
+// made (deliverHeld), where it made any, for the answer that ended the card to
+// name (recordDelivered).
+func (w *wtx) retireMappingCards(source string, is func(sender string) bool, who, actor string) (map[string][]uint64, error) {
 	settled := func(a Ask) bool {
 		return a.Identity != nil && a.Identity.Source == source && is(a.Identity.Sender)
 	}
 	// The open index is a snapshot of keys: closing a bead below takes it
 	// out of the index without moving this loop.
+	delivered := map[string][]uint64{}
 	for _, uuid := range keys(w.Tx, bBeadOpen, "") {
 		notes, err := beadNotes(w.Tx, uuid)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		reason := ""
 		for _, r := range ResolveAsks(notes, now()) {
@@ -611,27 +615,29 @@ func (w *wtx) retireMappingCards(source string, is func(sender string) bool, who
 		}
 		row, err := w.loadBead(uuid)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if err := w.takeBackStage(row, reason, settled); err != nil {
-			return err
+			return nil, err
 		}
 		// The take-back wrote a note: close the bead as it stands now.
 		if row, err = w.loadBead(uuid); err != nil {
-			return err
+			return nil, err
 		}
 		if who == "ignored" {
 			if err := w.dropHeld(uuid); err != nil {
-				return err
+				return nil, err
 			}
-		} else if err := w.deliverHeld(uuid, who); err != nil {
-			return err
+		} else if seqs, err := w.deliverHeld(uuid, who); err != nil {
+			return nil, err
+		} else if len(seqs) > 0 {
+			delivered[uuid] = seqs
 		}
 		if err := w.closeCard(row, reason, actor); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return nil
+	return delivered, nil
 }
 
 // retireClaimCards ends the claim cards for the address in source the write
@@ -743,9 +749,10 @@ func (a Ask) identityAsked() *IdentityAsked {
 // writes nothing and leaves the card open. A pick that writes an identity
 // is a weighty approval, and is refused too, with the card left open, when
 // the call does not say that its person saw the weight (weighed). row is
-// the card's bead, as the answer was written on it;
-// the answer is recorded before this runs.
-func (w *wtx) answerMapping(ctx context.Context, row *beadRow, ask Ask, ans Answer, actor string, weighed bool) error {
+// the card's bead, as the answer was written on it, and note the answer's
+// note: the answer is recorded before this runs, and what a pick delivers is
+// named on it (recordDelivered).
+func (w *wtx) answerMapping(ctx context.Context, row *beadRow, note *Note, ask Ask, ans Answer, actor string, weighed bool) error {
 	id := ask.Identity
 	if id == nil {
 		return nil
@@ -792,9 +799,9 @@ func (w *wtx) answerMapping(ctx context.Context, row *beadRow, ask Ask, ans Answ
 		}
 		switch ask.Options[ans.Option-1].Label {
 		case MappingSomeoneNew:
-			return w.answerSomeoneNew(ctx, ask, ans, actor)
+			return w.answerSomeoneNew(ctx, row, note, ask, ans, actor)
 		case MappingLetIn:
-			return w.answerLetIn(row, ask, ans, actor)
+			return w.answerLetIn(row, note, ask, ans, actor)
 		case MappingNobody:
 			return w.answerNobody(ctx, ask, ans, actor)
 		default:
@@ -808,8 +815,11 @@ func (w *wtx) answerMapping(ctx context.Context, row *beadRow, ask Ask, ans Answ
 	if _, err := getUser(w.Tx, user); err != nil {
 		return fmt.Errorf("ask %d names %s, who is no user of the yard now: the card is from before that changed. %s", ans.Ask, user, nothingRan)
 	}
-	_, err := w.setUserIdentity(ctx, user, id.Source, Identity{ID: id.Sender}, actor, nil)
-	return err
+	_, delivered, err := w.setUserIdentity(ctx, user, id.Source, Identity{ID: id.Sender}, actor, nil)
+	if err != nil {
+		return err
+	}
+	return w.recordDelivered(row, note, delivered[row.UUID])
 }
 
 // mayAnswerMapping asks whether actor may give ans to the mapping card ask on
@@ -831,13 +841,18 @@ func (w *wtx) mayAnswerMapping(ctx context.Context, row *beadRow, ask Ask, ans A
 // so their next delivery offers a fresh card. A sender mapped
 // meanwhile is stale, as any pick's is, and delivers nothing. A card
 // whose bead was closed by hand, with the ask still open, has
-// nothing left to close, as a decline's has.
-func (w *wtx) answerLetIn(row *beadRow, ask Ask, ans Answer, actor string) error {
+// nothing left to close, as a decline's has. The events it delivers
+// are named on the answer's note (recordDelivered).
+func (w *wtx) answerLetIn(row *beadRow, note *Note, ask Ask, ans Answer, actor string) error {
 	id := ask.Identity
 	if err := w.mappingStale(id, ans.Ask); err != nil {
 		return err
 	}
-	if err := w.deliverHeld(row.UUID, SpeakerOutside); err != nil {
+	seqs, err := w.deliverHeld(row.UUID, SpeakerOutside)
+	if err != nil {
+		return err
+	}
+	if err := w.recordDelivered(row, note, seqs); err != nil {
 		return err
 	}
 	if !row.open() {
@@ -879,8 +894,9 @@ func (w *wtx) mappingStale(id *AskIdentity, seq uint64) error {
 // words, an invalid name and a taken name refuse the answer with the
 // reason and leave the card open: nothing is added and no identity is
 // written. A sender mapped meanwhile is stale before any name is read,
-// and adds nobody.
-func (w *wtx) answerSomeoneNew(ctx context.Context, ask Ask, ans Answer, actor string) error {
+// and adds nobody. What the card held is delivered as the new user, and
+// named on the answer's note (recordDelivered).
+func (w *wtx) answerSomeoneNew(ctx context.Context, row *beadRow, note *Note, ask Ask, ans Answer, actor string) error {
 	id := ask.Identity
 	if err := w.mappingStale(id, ans.Ask); err != nil {
 		return err
@@ -896,8 +912,11 @@ func (w *wtx) answerSomeoneNew(ctx context.Context, ask Ask, ans Answer, actor s
 	if _, err := w.insertUser(ctx, name, actor, nil); err != nil {
 		return err
 	}
-	_, err := w.setUserIdentity(ctx, name, id.Source, Identity{ID: id.Sender}, actor, nil)
-	return err
+	_, delivered, err := w.setUserIdentity(ctx, name, id.Source, Identity{ID: id.Sender}, actor, nil)
+	if err != nil {
+		return err
+	}
+	return w.recordDelivered(row, note, delivered[row.UUID])
 }
 
 // answerNobody ignores the ask's sender, so their later messages are
