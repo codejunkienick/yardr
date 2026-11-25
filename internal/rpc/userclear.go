@@ -103,7 +103,7 @@ func inTheClear(r *http.Request, name, router string, crosses, member, google bo
 		return teammatesInTheClear(r, router, "the teammates list", "read it on the yard's machine.")
 	}
 	if name == "UninviteTeammate" {
-		return teammatesInTheClear(r, router, "filing a teammate's removal", "File it on the yard's machine.")
+		return teammatesInTheClear(r, router, "filing a teammate's removal", "file it on the yard's machine.")
 	}
 	if name == "TelemetryShow" {
 		return telemetryShowInTheClear(r, router)
@@ -304,7 +304,8 @@ func lineInTheClear(r *http.Request, router string) string {
 // the operator's, so both are read and filed over https or from the yard's
 // own machine, and down the link from the edge from a paired device of the
 // operator, as an approval is. what names the call in a refusal, and
-// readHere the fix on the yard's machine.
+// readHere the fix on the yard's machine, which each refusal gives after "or"
+// and so starts in lower case.
 func teammatesInTheClear(r *http.Request, router, what, readHere string) string {
 	const crossed = " The device's token was sent with it and may have crossed a network in the clear: if it did, remove the device and add it again (yardr user device rm)."
 	if r.RemoteAddr == linkRemoteAddr {
@@ -423,10 +424,13 @@ func telemetryShowInTheClear(r *http.Request, router string) string {
 // yardr-fwhv, section 3.6).
 func telemetrySetInTheClear(r *http.Request) string {
 	const crossed = " The device's token was sent with it and may have crossed a network in the clear: if it did, remove the device and add it again (yardr user device rm)."
-	const changeHere = "Change it on the yard's machine (`yardr telemetry on` or `yardr telemetry off`)."
+	// changeHere follows "or " in two of the refusals below, so it starts in
+	// lower case; the refusal down the link starts a sentence with it and
+	// capitalises it there.
+	const changeHere = "change it on the yard's machine (`yardr telemetry on` or `yardr telemetry off`)."
 	if r.RemoteAddr == linkRemoteAddr {
 		return "the telemetry switch is not changed over the link: this request came down the link from the edge. " +
-			changeHere + " The edge saw the device's token with it: remove the device and add it again (yardr user device rm)."
+			"C" + changeHere[1:] + " The edge saw the device's token with it: remove the device and add it again (yardr user device rm)."
 	}
 	if ip := net.ParseIP(remote(r)); ip == nil || !ip.IsLoopback() {
 		return "the telemetry switch is taken over https only, or from the yard's own machine: this request reached the yard's listener in plain HTTP from another machine. " +

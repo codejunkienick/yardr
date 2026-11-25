@@ -101,16 +101,18 @@ func TestStageWriteInTheClear(t *testing.T) {
 // do are the one for a request from another machine and the one for a request
 // behind a proxy that says plain. The refusal down the link has no "or" and
 // says the same words as a sentence of its own, where they keep their capital;
-// the grant list and the telemetry preview have such a refusal, which makes
-// each of them a constant used both ways.
+// the grant list, the telemetry preview and the telemetry switch's change have
+// such a refusal, which makes each of them a constant used both ways.
 func TestRefusalsGiveTheFixAfterOrInLowerCase(t *testing.T) {
 	const here = "read it on the yard's machine"
 	for _, call := range []struct{ name, fix string }{
 		{"Teammates", here + "."},
+		{"UninviteTeammate", "file it on the yard's machine."},
 		{"SourceGrants", here + " (`yardr source grants`)."},
 		{"SessionScreen", here + "."},
 		{"Line", here + "."},
 		{"TelemetryShow", here + " (`yardr telemetry show`)."},
+		{"TelemetrySet", "change it on the yard's machine (`yardr telemetry on` or `yardr telemetry off`)."},
 	} {
 		for _, c := range []struct{ name, remote, proto string }{
 			{"from another machine", "203.0.113.9:40000", ""},
@@ -124,9 +126,16 @@ func TestRefusalsGiveTheFixAfterOrInLowerCase(t *testing.T) {
 			})
 		}
 	}
+	t.Run("UninviteTeammate/down the link behind a proxy that says plain", func(t *testing.T) {
+		got := inTheClear(clearRequest(linkRemoteAddr, "http"), "UninviteTeammate", "", false, false, false)
+		if want := ", or file it on the yard's machine."; !strings.Contains(got, want) {
+			t.Errorf("the refusal is %q, want it to say %q", got, want)
+		}
+	})
 	for _, call := range []struct{ name, sentence string }{
 		{"SourceGrants", "Read it on the yard's machine (`yardr source grants`)."},
 		{"TelemetryShow", "Read it on the yard's machine (`yardr telemetry show`)."},
+		{"TelemetrySet", "Change it on the yard's machine (`yardr telemetry on` or `yardr telemetry off`)."},
 	} {
 		t.Run(call.name+"/down the link", func(t *testing.T) {
 			got := inTheClear(clearRequest(linkRemoteAddr, ""), call.name, "", false, false, false)
