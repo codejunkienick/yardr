@@ -2163,7 +2163,7 @@ internal/cli/beads.go 1098 the bead show, list and history commands and their pr
 internal/cli/crew.go 1950 the crew, inbox, mail and memory commands
 internal/cli/doctor.go 1243 the doctor examinations and its report
 internal/cli/init.go 1597 yard init, onboarding and settings
-internal/cli/ops.go 1699 the server, daemon, depot, group, route and session commands
+internal/cli/ops.go 1696 the server, daemon, depot, group, route and session commands
 internal/cli/pack.go 1866 pack loading, import planning and its question rounds
 internal/cli/peers.go 1564 the peer identity, intake and ping commands
 internal/cli/routereport.go 1513 the route report and its rendering
@@ -2178,7 +2178,7 @@ internal/rpc/user.go 1053 the user server and callers (pairing is userpair.go, e
 internal/standin/standin.go 1508 the fake Linear, GitHub and edge APIs
 internal/store/asks.go 1683 ask and answer parsing and storage
 internal/store/beads.go 2557 bead CRUD, queries and dispatch reads
-internal/store/crew.go 1459 crew records and their events
+internal/store/crew.go 1455 crew records and their events
 internal/store/flows.go 1358 flow parsing and storage
 internal/store/graph.go 1311 the dependency graph and its queries
 internal/store/hooks.go 1091 webhook parsing and the say shapes
@@ -2192,7 +2192,7 @@ internal/store/runask_list.go 1221 ask cards, labels and preset reading
 internal/store/runask_setup.go 1503 the setup ask, its card, and the carrying record
 internal/store/sourcecalls.go 1236 source grants and callables
 internal/store/subscriptions.go 1145 identities, subscriptions and where-clauses
-internal/store/users.go 1222 user records and operator words
+internal/store/users.go 1197 user records and operator words
 '
 # filesizebudget fails the run when a non-test Go file stands over its
 # ceiling in the table above, or when one with no row stands over 1000

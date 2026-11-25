@@ -129,13 +129,14 @@ Thank you to everyone who built them.
 
 ## Contributing
 
-The repository takes no outside contributions yet. When it does, every
-outside contribution must carry a `Signed-off-by` line with the author's name
-and email address (`git commit -s`): it certifies the Developer Certificate of
-Origin, <https://developercertificate.org>, that the author wrote the change,
-or may submit it, under the project's licence. A yardr agent session instead
-writes the `Yardr-Bead` and `Yardr-Agent` trailers described in
-[groups.md](docs/groups.md#runners).
+Issues and pull requests from outside are welcome. For work beyond a small
+fix, open an issue first. Small changes that do not grow the codebase are
+likeliest to be taken. A contribution is given under the project's
+[licence](#licence); no sign-off or agreement is asked. A maintainer first
+says yes to one commit before it is read or run. The yard reviews it and posts
+its review as a comment, then runs its own CI; a maintainer merges. The yard
+may push a fix onto your pull request's branch as its GitHub App, so keep
+"Allow edits by maintainers" on. [More](docs/packs.md#the-contributors-pack).
 
 ## Licence
 
