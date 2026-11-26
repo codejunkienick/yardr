@@ -26,7 +26,9 @@ func (c *countingAPI) ListBeads(ctx context.Context, f store.BeadFilter) ([]stor
 	return c.API.ListBeads(ctx, f)
 }
 
-// boardYard is a counting yard with one travelling bead.
+// boardYard is a counting yard with one travelling bead. The board caches
+// are process-wide, so its cleanup forgets the boards asked of it, and the
+// next test, or the next run of this one, does not find them.
 func boardYard(t *testing.T) (*countingAPI, context.Context) {
 	t.Helper()
 	base, _ := storetest.NewOwned(t)
@@ -34,7 +36,9 @@ func boardYard(t *testing.T) (*countingAPI, context.Context) {
 	if _, err := base.CreateBead(ctx, store.NewBead{Title: "the work", Stage: "new"}, "me"); err != nil {
 		t.Fatal(err)
 	}
-	return &countingAPI{API: base}, ctx
+	y := &countingAPI{API: base}
+	t.Cleanup(func() { eta.ForgetBoards(y) })
+	return y, ctx
 }
 
 var boardNow = time.Date(2099, 1, 1, 12, 0, 0, 0, time.UTC)
@@ -110,20 +114,19 @@ func TestArrivalsBoardSharedWhileHeadStands(t *testing.T) {
 	}
 }
 
-// boardEvictRun numbers this test's runs in the binary: each run fills
-// minutes later than the last one's, so a repeated run (-count=2) evicts
-// the earlier run's boards first, and all of them before boardNow, so the
-// parallel board tests' keeps evict these leftovers and never their own.
-var boardEvictRun atomic.Int64
-
 // Thirty-three distinct viewers ask for the arrivals board at one head in
 // successive minutes: the cache keeps 32, the stalest minute's board is
-// dropped, and asking it again computes it whole. Sequential: the boards'
-// cache is shared across the package's tests, and the parallel ones run
-// after the sequential ones, on these leftovers.
+// dropped, and asking it again computes it whole. It runs sequentially,
+// because the caches are shared across the package's tests and the cap counts
+// keys across all of them, so a board kept by a parallel test would take one
+// of the 32 slots. Every board test empties its yard's boards at cleanup, so
+// this one counts only its own 33 keys, on a repeated run as on the first.
 func TestArrivalsBoardEvictsStalestPastCap(t *testing.T) {
 	y, ctx := boardYard(t)
-	base := boardNow.Add(time.Duration(-100000+100*boardEvictRun.Add(1)) * time.Minute)
+	// The 33 minutes fall before boardNow, where the other board tests ask,
+	// so none of these keys can tie with theirs on head and minute. Evict
+	// settles such a tie by map order.
+	base := boardNow.Add(-100 * time.Minute)
 	at := func(i int) time.Time { return base.Add(time.Duration(i) * time.Minute) }
 	for i := 0; i < 33; i++ {
 		if _, err := eta.ArrivalsViaStore(ctx, y, fmt.Sprintf("viewer-%d", i), at(i)); err != nil {
@@ -249,5 +252,39 @@ func TestFlowsBoardReusedWhileHeadStands(t *testing.T) {
 			t.Errorf("a caller's shaping reached the kept board: %+v", third.Depots[0])
 		}
 		wantFold("third", third)
+	}
+}
+
+// ForgetBoards takes a yard's kept arrivals board and flows board, and no
+// other yard's. The board tests run beside each other and each keeps its own,
+// and a repeated run starts clear only when every cleanup takes all of its
+// yard's boards.
+func TestForgetBoardsTakesOnlyOneYardsBoards(t *testing.T) {
+	t.Parallel()
+	dropped, ctx := boardYard(t)
+	kept, _ := boardYard(t)
+	// listed is how many times asking both boards of y listed beads.
+	listed := func(y *countingAPI) int64 {
+		t.Helper()
+		before := y.listings.Load()
+		if _, err := eta.ArrivalsViaStore(ctx, y, "", boardNow); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := eta.FlowsViaStore(ctx, y, "", boardNow); err != nil {
+			t.Fatal(err)
+		}
+		return y.listings.Load() - before
+	}
+	whole := listed(dropped)
+	if whole == 0 {
+		t.Fatal("asking both boards of a yard listed no beads, so reuse cannot be told from a computation")
+	}
+	listed(kept)
+	eta.ForgetBoards(dropped)
+	if got := listed(kept); got != 0 {
+		t.Errorf("asking the other yard's boards listed beads %d times after the first yard's were forgotten, want 0 (kept)", got)
+	}
+	if got := listed(dropped); got != whole {
+		t.Errorf("asking the forgotten yard's boards listed beads %d times, want %d (both computed whole)", got, whole)
 	}
 }
