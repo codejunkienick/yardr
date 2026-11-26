@@ -64,11 +64,11 @@ func (h *Herdr) Model(ctx context.Context, handle map[string]any, startedAt time
 // session file is found: what herdr reports for the pane, or, when herdr
 // names no id and the kind declares a workspace, the worktree match's
 // (matchWorkspace), or, when its session locator names an index, the
-// index's id for the worktree or verified crew directory (indexSession).
-// "" while there is none: the agent has not started its session, is gone,
-// or its file matches nothing yet. It is where Model and Context start,
-// without their reading of the file, so an agent that has not answered
-// yet, or whose kind names no model, has its id all the same.
+// index's id for the verified crew directory (indexSession). "" while
+// there is none: the agent has not started its session, is gone, or its
+// file matches nothing yet. It is where Model and Context start, without
+// their reading of the file, so an agent that has not answered yet, or
+// whose kind names no model, has its id all the same.
 func (h *Herdr) SessionID(ctx context.Context, handle map[string]any, startedAt time.Time) (string, error) {
 	kind, id, err := h.sessionKind(ctx, handle)
 	if err != nil || id != "" {
@@ -80,10 +80,6 @@ func (h *Herdr) SessionID(ctx context.Context, handle map[string]any, startedAt 
 		}
 	}
 	if src := kind.SessionFile(); src != nil && src.Index != nil {
-		worktree, _ := handle["worktree"].(string)
-		if worktree != "" {
-			return h.indexSession(kind, worktree, startedAt, "")
-		}
 		dir, _ := handle["dir"].(string)
 		launch, _ := handle[launchReference].(string)
 		prompt, _ := handle[firstPrompt].(string)

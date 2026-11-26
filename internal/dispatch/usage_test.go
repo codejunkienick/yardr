@@ -343,29 +343,6 @@ func TestAgentSessionIsAskedOnceMoreAtTeardown(t *testing.T) {
 	wantRecorded(t, s, b.ID, map[string]map[string]any{session: counts(100, 100, 10, 0, 0)})
 }
 
-// An indexed session locator is never asked at teardown: another session
-// may already own the directory. A bead session that ends without its id
-// ends with a count that says its kind declares no usage.
-func TestAgentSessionIndexedIsNeverAskedAtTeardown(t *testing.T) {
-	t.Parallel()
-	s, r, d := countSetup(t, "agy", nil, 1)
-	now := time.Now().Add(20 * time.Minute)
-	dispatch.SetClock(d, func() time.Time { return now })
-	b := newBead(t, s, "x")
-	passes(t, d, 2) // started 20 minutes ago by the dispatcher's clock
-	session := sessionOf(t, s, b.ID)
-	if h := sessionHandle(t, s, b.ID); r.asked != 0 || h[dispatch.AgentSession] != nil {
-		t.Fatalf("asked %d times, handle %v: a session past the window is not asked", r.asked, h)
-	}
-	endSession(t, s, b.ID)
-	passes(t, d, 1)
-	if r.asked != 0 {
-		t.Fatalf("asked %d times at teardown, want none", r.asked)
-	}
-	passes(t, d, 1)
-	wantRecorded(t, s, b.ID, map[string]map[string]any{session: {"missing": "kind declares no usage"}})
-}
-
 // Every session that ran an agent ends with one session_usage, whatever the
 // number of passes and daemons after it.
 func TestEachSessionIsCountedOnce(t *testing.T) {

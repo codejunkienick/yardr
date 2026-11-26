@@ -179,7 +179,7 @@ func TestHarnessListAndShow(t *testing.T) {
 		"window: from the declared capacities for the model at model of the same line",
 		"clear the reading on line of type CHECKPOINT",
 		"Session file locator", "~/.gemini/antigravity-cli/brain/{session}/.system_generated/logs/transcript.jsonl",
-		"index: ~/.gemini/antigravity-cli/cache/last_conversations.json, exact directory key, id at .; pinned on a live pass, never after the end, when the transcript's first created_at is at or after the session's start, and for a crew session its first prompt",
+		"index: ~/.gemini/antigravity-cli/cache/last_conversations.json, exact directory key, id at .; pinned on a live pass of a crew session, never after the end, when the transcript's first created_at is at or after the session's start and its first prompt is that launch's",
 		"rate_limited  ^Individual quota reached")
 	wantText(t, ask(0, "harness", "show", "claude"), "claude  Claude Code, by Anthropic  (harnesses/claude.yaml, version 1)")
 	wantText(t, ask(0, "harness", "show", "pi"), "effort:     none: a group of this kind takes no effort=", "Models it offers", "none named: --model takes any id",

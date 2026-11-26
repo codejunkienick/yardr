@@ -10,11 +10,11 @@ import (
 	"time"
 )
 
-// An indexed session locator pins the conversation a live session owns: a
-// bead by its worktree key, a crew by its directory key and its launch's
-// first prompt, since several panes can share the directory. A transcript
-// that started before the launch is an earlier session's record, never a
-// match, and an index that names no plain id is an error, never a guess.
+// An indexed session locator pins the conversation a crew session owns:
+// its directory key and its launch's first prompt, since several panes
+// can share the directory. A transcript that started before the launch is
+// an earlier session's record, never a match, and an index that names no
+// plain id is an error, never a guess. A bead's worktree pins nothing.
 func TestHerdrSessionIDIndexed(t *testing.T) {
 	ctx := context.Background()
 	launch := time.Date(2026, 11, 24, 10, 41, 0, 0, time.UTC)
@@ -43,14 +43,9 @@ func TestHerdrSessionIDIndexed(t *testing.T) {
 		}
 		return home
 	}
-	bead := func(dir string) map[string]any { return map[string]any{"kind": "agy", "worktree": dir} }
 	crew := func(dir string) map[string]any {
 		return map[string]any{"kind": "agy", "dir": dir, launchReference: "7f3a9c1e5b2d4a68",
 			firstPrompt: prompt, contextStartedAt: launch.Format(time.RFC3339Nano)}
-	}
-	askBead := func(t *testing.T, h *Herdr, handle map[string]any) (string, error) {
-		t.Helper()
-		return h.SessionID(ctx, handle, launch)
 	}
 	askCrew := func(t *testing.T, h *Herdr, handle map[string]any) (string, error) {
 		t.Helper()
@@ -60,41 +55,41 @@ func TestHerdrSessionIDIndexed(t *testing.T) {
 	}
 
 	own := first(launch.Add(time.Second), wrapped(prompt))
-	t.Run("bead worktree", func(t *testing.T) {
+	t.Run("bead worktree pins nothing", func(t *testing.T) {
 		h := &Herdr{AgentHomes: map[string]string{"agy": home(t, `{"/work/bead":"own"}`, map[string]string{"own": own})}}
-		if id, err := askBead(t, h, bead("/work/bead")); id != "own" || err != nil {
-			t.Fatalf("session = %q, %v; want own, nil", id, err)
+		if id, err := h.SessionID(ctx, map[string]any{"kind": "agy", "worktree": "/work/bead"}, launch); id != "" || err != nil {
+			t.Fatalf("session = %q, %v; want \"\", nil", id, err)
 		}
 	})
 	t.Run("earlier record is no match", func(t *testing.T) {
-		old := first(launch.Add(-time.Second), wrapped("an earlier session's prompt"))
-		h := &Herdr{AgentHomes: map[string]string{"agy": home(t, `{"/work/bead":"old"}`, map[string]string{"old": old})}}
-		if id, err := askBead(t, h, bead("/work/bead")); id != "" || err != nil {
+		old := first(launch.Add(-time.Second), wrapped(prompt))
+		h := &Herdr{AgentHomes: map[string]string{"agy": home(t, `{"/work/crew":"old"}`, map[string]string{"old": old})}}
+		if id, err := askCrew(t, h, crew("/work/crew")); id != "" || err != nil {
 			t.Fatalf("session = %q, %v; want \"\", nil", id, err)
 		}
 	})
 	t.Run("no index is no session", func(t *testing.T) {
 		h := &Herdr{AgentHomes: map[string]string{"agy": home(t, "", map[string]string{"own": own})}}
-		if id, err := askBead(t, h, bead("/work/bead")); id != "" || err != nil {
+		if id, err := askCrew(t, h, crew("/work/crew")); id != "" || err != nil {
 			t.Fatalf("session = %q, %v; want \"\", nil", id, err)
 		}
 	})
 	t.Run("no transcript is no session", func(t *testing.T) {
-		h := &Herdr{AgentHomes: map[string]string{"agy": home(t, `{"/work/bead":"gone"}`, nil)}}
-		if id, err := askBead(t, h, bead("/work/bead")); id != "" || err != nil {
+		h := &Herdr{AgentHomes: map[string]string{"agy": home(t, `{"/work/crew":"gone"}`, nil)}}
+		if id, err := askCrew(t, h, crew("/work/crew")); id != "" || err != nil {
 			t.Fatalf("session = %q, %v; want \"\", nil", id, err)
 		}
 	})
 	t.Run("invalid index is an error", func(t *testing.T) {
 		h := &Herdr{AgentHomes: map[string]string{"agy": home(t, `null`, map[string]string{"own": own})}}
-		id, err := askBead(t, h, bead("/work/bead"))
+		id, err := askCrew(t, h, crew("/work/crew"))
 		if id != "" || err == nil || !strings.Contains(err.Error(), "invalid JSON object") {
 			t.Fatalf("session = %q, %v; want an invalid index error", id, err)
 		}
 	})
 	t.Run("hostile id is an error", func(t *testing.T) {
-		h := &Herdr{AgentHomes: map[string]string{"agy": home(t, `{"/work/bead":"../escape"}`, map[string]string{"own": own})}}
-		id, err := askBead(t, h, bead("/work/bead"))
+		h := &Herdr{AgentHomes: map[string]string{"agy": home(t, `{"/work/crew":"../escape"}`, map[string]string{"own": own})}}
+		id, err := askCrew(t, h, crew("/work/crew"))
 		if id != "" || err == nil || !strings.Contains(err.Error(), "not a plain session id") || strings.Contains(err.Error(), "escape") {
 			t.Fatalf("session = %q, %v; want a plain id error without the file's text", id, err)
 		}

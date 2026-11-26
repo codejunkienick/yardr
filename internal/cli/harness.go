@@ -341,7 +341,7 @@ func printHarness(w io.Writer, h store.Harness, has bool) {
 		fmt.Fprintln(w, "\nSession file locator")
 		fmt.Fprintf(w, "  %s\n", sessionFiles(src.Home, src.HomeEnv, src.Glob))
 		if idx := src.Index; idx != nil {
-			fmt.Fprintf(w, "  index: %s, exact directory key, id at %s; pinned on a live pass, never after the end, when the transcript's first %s is at or after the session's start, and for a crew session its first prompt\n", sessionFiles(src.Home, src.HomeEnv, idx.File), idx.Field, idx.At)
+			fmt.Fprintf(w, "  index: %s, exact directory key, id at %s; pinned on a live pass of a crew session, never after the end, when the transcript's first %s is at or after the session's start and its first prompt is that launch's\n", sessionFiles(src.Home, src.HomeEnv, idx.File), idx.Field, idx.At)
 		}
 	}
 	if len(h.Usage) > 0 {
