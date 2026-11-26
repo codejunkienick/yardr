@@ -433,19 +433,26 @@ use first, by the clock as a failsafe.
 yardr reads what its agent holds from the agent's own session file while
 the session works, and again on each idle pass: Claude Code's last assistant
 line's usage, Muse's last `model_completed` input, Codex's last `token_count`
-call's input (not its running total), or pi's last assistant message's
+call's input (not its running total), pi's last assistant message's
 usage (its `input`, `cacheRead` and `cacheWrite`, without the `output` that
-pi's own footer adds). Muse and Codex input already includes its cache. Codex's
-window is read from the same call's `model_context_window`; without it, no
-reading is recorded. The window is declared by the harness where known
-(1,007,997 tokens for Muse); otherwise it is 200k tokens, or 1M where the
-model the crew member asks for carries `[1m]` (`--set model=opus[1m]`). pi's
-file names no window, so the yard uses the asked model name's window: 200k
-by default, or the size in a bracketed suffix. When that estimate differs
-from the model's actual window, a larger estimate delays the handoff and a
-smaller one brings it sooner. A session with no reading yet (pi writes its
-file at its first reply), or no unique file matching its worktree, waits for
-a later pass.
+pi's own footer adds), or Antigravity's last `PLANNER_RESPONSE` line's input
+and cache-read tokens added up. Muse and Codex input already includes its
+cache. Codex's window is read from the same call's `model_context_window`;
+without it, no reading is recorded. Antigravity uses the declared capacity
+for the model that answered, such as 524,288 tokens for Gemini 4 Neon; a
+response that names an unknown model, and a `CHECKPOINT`, clear the reading
+until a fresh response gives usage for a known model. The window is declared
+by the harness where known (1,007,997 tokens for Muse); otherwise it is 200k
+tokens, or 1M where the model the crew member asks for carries `[1m]`
+(`--set model=opus[1m]`). pi's file names no window, so the yard uses the
+asked model name's window: 200k by default, or the size in a bracketed suffix.
+When that estimate differs from the model's actual window, a larger estimate
+delays the handoff and a smaller one brings it sooner. Auto-compaction can
+run before the 60% handoff. A crew that should hand off before it compacts
+sets `AGY_CLI_AUTO_COMPACT_OVERRIDE` above the handoff threshold in the
+member's environment. A session with no reading yet (pi writes its file at
+its first reply; Antigravity reads only its pinned conversation), or no
+unique file matching its worktree, waits for a later pass.
 At `--context-handoff` percent (60 unless set, 0
 for never), and only while the session is idle with nothing in its input, it
 nudges once: "Your context is N% of the window. Write your
