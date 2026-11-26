@@ -441,16 +441,21 @@ func (d *Dispatcher) closeLeft(ctx context.Context, runner Runner, s *memberSess
 // asked on every pass for ever. With last it asks past the window too, as
 // the session is stopped and while its agent's tab is open (lastAgentSession):
 // a crew session lives for a day, and an agent that was slow to start its own
-// session would be missed by the first look alone. The ending of the session
+// session would be missed by the first look alone. Indexed locators are
+// asked on every live pass and never at teardown. The ending of the session
 // copies the id off the handle, which does not outlive it (store.CrewUncounted).
 // s.st.Handle is updated with what it stores.
 func (d *Dispatcher) crewAgentSession(ctx context.Context, r Runner, s *memberSession, last bool) {
-	if !s.st.Live() || !last && (s.st.StartedAt == nil || d.now().Sub(*s.st.StartedAt) > ModelWindow) {
+	if !s.st.Live() {
 		return
 	}
-	// A crew handle carries no worktree, so the match the start is for has
-	// nothing to match; the zero start of a session that never started one
-	// is never read.
+	if indexedHandle(s.st.Handle) {
+		if last {
+			return
+		}
+	} else if !last && (s.st.StartedAt == nil || d.now().Sub(*s.st.StartedAt) > ModelWindow) {
+		return
+	}
 	var started time.Time
 	if s.st.StartedAt != nil {
 		started = *s.st.StartedAt

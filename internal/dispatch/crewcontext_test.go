@@ -101,6 +101,24 @@ func TestContextThresholds(t *testing.T) {
 			t.Fatalf("reading = %+v", r.CrewSession)
 		}
 	})
+	t.Run("an agy window", func(t *testing.T) {
+		t.Parallel()
+		s, f, d := crewSetup(t, store.CrewMember{Config: map[string]any{"kind": "agy", "model": "gemini-4-hydrogen-high"}})
+		f.ctxOK, f.ctxUsed, f.ctxWindow = true, 600000, 1048576 // 57%: under it
+		must(t, d.Reconcile(ctx))
+		must(t, d.Reconcile(ctx))
+		if len(f.nudges) != 0 {
+			t.Fatalf("nudges %v", f.nudges)
+		}
+		f.ctxUsed = 629146 // 60% of agy's window: asked
+		must(t, d.Reconcile(ctx))
+		if len(f.nudges) != 1 || !strings.Contains(f.nudges[0], "Your context is 60% of the window. ") {
+			t.Fatalf("nudges %v", f.nudges)
+		}
+		if r, _ := s.GetCrew(ctx, "yardmaster"); r.ContextPct != 60 || r.ContextWindow != 1048576 {
+			t.Fatalf("reading = %+v", r.CrewSession)
+		}
+	})
 	t.Run("a declared window takes precedence", func(t *testing.T) {
 		t.Parallel()
 		s, f, d := crewSetup(t, store.CrewMember{Config: map[string]any{"kind": "muse", "model": "example[200k]"}})

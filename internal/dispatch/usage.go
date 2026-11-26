@@ -65,9 +65,11 @@ func Countable(r Runner, h map[string]any) bool {
 // its runner once more before Stop closes the agent's tab: a session that
 // ended before a pass recorded its id (agentSession) has no other chance,
 // since the runtime knows no agent after. "" when the handle has the id
-// already, when the runner names none, or when s is not counted.
+// already, when the runner names none, or when s is not counted. Indexed
+// locators are never asked here: another session may already own the
+// directory.
 func (d *Dispatcher) lastAgentSession(ctx context.Context, r Runner, s store.Session) string {
-	if !Countable(r, s.Handle) {
+	if !Countable(r, s.Handle) || indexedHandle(s.Handle) {
 		return ""
 	}
 	return askAgentSession(ctx, r, s.Handle, s.StartedAt)

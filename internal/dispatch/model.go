@@ -9,6 +9,7 @@ import (
 	"time"
 	"unicode"
 
+	"yardr.dev/yardr/internal/agents"
 	"yardr.dev/yardr/internal/store"
 )
 
@@ -90,6 +91,13 @@ func (d *Dispatcher) agentSession(ctx context.Context, r Runner, s *store.Sessio
 		return
 	}
 	s.Handle = h
+}
+
+// indexedHandle identifies kinds whose mutable index is usable only while live.
+func indexedHandle(handle map[string]any) bool {
+	name, _ := handle["kind"].(string)
+	kind, _ := agents.Lookup(name)
+	return kind.Session != nil && kind.Session.Index != nil
 }
 
 // model records, once per session, the model s's agent reports next to the

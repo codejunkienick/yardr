@@ -259,6 +259,27 @@ func TestCrewAgentSessionIsAskedOnceMoreAtItsStop(t *testing.T) {
 	wantCrewCounted(t, s, crewCount{Member: "yardmaster", Kind: "codex", Agent: agentID(agent), Usage: counts(100, 100, 10, 0, 0)})
 }
 
+// An indexed session locator is asked on every live pass and never at the
+// stop: the index is live while the session runs, and another session may
+// own the directory once it ends. The entry the ending copies off the handle
+// carries the live pin.
+func TestCrewAgentSessionIndexedIsAskedOnLivePasses(t *testing.T) {
+	t.Parallel()
+	s, c, d := crewCountSetup(t, "agy")
+	now := time.Now().Add(20 * time.Minute)
+	dispatch.SetClock(d, func() time.Time { return now })
+	passes(t, d, 3) // started 20 minutes ago by the dispatcher's clock
+	agent := crewAgent(t, s, "")
+	if h := crewSessionOf(t, s, "").Handle; c.asked != 1 || h[dispatch.AgentSession] != agentID(agent) {
+		t.Fatalf("asked %d times, handle %v: a live indexed session is asked past the window", c.asked, h)
+	}
+	handOff(t, s, agent)
+	passes(t, d, 1)
+	if due := crewSessionOf(t, s, "").Uncounted; c.asked != 1 || len(due) != 1 || due[0].AgentSession != agentID(agent) {
+		t.Fatalf("asked %d times, waiting %+v: want no ask at the stop, and the live id on the entry", c.asked, due)
+	}
+}
+
 // The agent's own total is waited for, on the dispatcher's clock, for ten
 // minutes from the stop the store recorded, and then the lines it wrote along
 // the way are counted and said to fall short: the rules of a bead's session.
