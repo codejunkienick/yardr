@@ -15,9 +15,11 @@ import (
 
 // indexSession finds a live session's conversation, allowing second-precision timestamps.
 // A crew directory can be shared, so its indexed file must also start with the launch's prompt.
-func (h *Herdr) indexSession(kind store.Harness, dir string, startedAt time.Time, prompt string) (string, error) {
+// The index and transcript are read under the pane's HOME (sessionHome),
+// which a crew environment may set apart from the daemon's.
+func (h *Herdr) indexSession(kind store.Harness, handle map[string]any, dir string, startedAt time.Time, prompt string) (string, error) {
 	src := kind.Session
-	home := h.harnessHome(kind.Kind, src.Home, src.HomeEnv)
+	home := h.sessionHome(handle, kind.Kind, src.Home, src.HomeEnv)
 	id, err := indexedSession(*src.Index, home, dir)
 	if err != nil || id == "" {
 		return "", err

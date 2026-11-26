@@ -65,11 +65,12 @@ func (h *Herdr) Context(ctx context.Context, handle map[string]any, startedAt ti
 		// An indexed locator is read only by the conversation id pinned
 		// on the handle: the index is live, and may already name another
 		// session's conversation. An unpinned session has no reading.
+		// The transcript stands under the pane's HOME (sessionHome).
 		id, _ := handle[agentSession].(string)
 		if !plainSessionID(id) || id == "." || id == ".." {
 			return 0, 0, false, nil
 		}
-		p, err := sessionFile(src.Pattern(h.harnessHome(kind.Kind, src.Home, src.HomeEnv), id))
+		p, err := sessionFile(src.Pattern(h.sessionHome(handle, kind.Kind, src.Home, src.HomeEnv), id))
 		if p == "" || err != nil {
 			return 0, 0, false, err
 		}

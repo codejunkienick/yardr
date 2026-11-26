@@ -917,6 +917,17 @@ esac`)
 			appendLine(t, path, `{"type":"CHECKPOINT"}`+"\n")
 			check(t, h, handle, 0, 0)
 		})
+		t.Run("pane home", func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir()) // the daemon's home holds no transcript
+			pane := t.TempDir()
+			pinnedPath := filepath.Join(pane, ".gemini/antigravity-cli", "brain", "own", ".system_generated", "logs", "transcript.jsonl")
+			write(pinnedPath, response("gemini-4-hydrogen-high", 100, 900))
+			reader := &Herdr{Bin: h.Bin}
+			pinned := maps.Clone(handle)
+			pinned[paneHome] = pane
+			check(t, reader, pinned, 1000, 1048576)
+			check(t, reader, handle, 0, 0)
+		})
 	})
 
 	t.Run("concurrent sessions read side by side", func(t *testing.T) {

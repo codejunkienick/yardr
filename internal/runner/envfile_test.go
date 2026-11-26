@@ -98,6 +98,39 @@ func TestStartCrewLoadsEnvFile(t *testing.T) {
 	checkEnvStart(t, readCalls(t, calls), "workspace.create", "yardmaster", handle, logs.String())
 }
 
+// A crew pane's HOME, when its env_file sets one apart from the daemon's,
+// reaches the pane and is kept on the handle for the indexed session reads;
+// without one the handle carries none and the reads use the daemon's home.
+func TestStartCrewRecordsPaneHome(t *testing.T) {
+	t.Parallel()
+	pane := t.TempDir()
+	file := filepath.Join(t.TempDir(), "home.env")
+	if err := os.WriteFile(file, []byte("HOME="+pane+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h, calls, _ := envHerdr(t, "")
+	r := store.CrewMember{Name: "yardmaster", Dir: t.TempDir(), Config: map[string]any{"kind": "agy", "env_file": file}}
+	handle, err := h.StartCrew(context.Background(), r, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if handle[paneHome] != pane {
+		t.Errorf("handle pane_home = %v, want %s", handle[paneHome], pane)
+	}
+	if env := envOf(apiCall(t, readCalls(t, calls), "workspace.create")); env["HOME"] != pane {
+		t.Errorf("pane HOME = %q, want %s", env["HOME"], pane)
+	}
+	h, _, _ = envHerdr(t, "")
+	r = store.CrewMember{Name: "yardmaster", Dir: t.TempDir(), Config: map[string]any{"kind": "agy"}}
+	handle, err = h.StartCrew(context.Background(), r, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if handle[paneHome] != nil {
+		t.Errorf("handle pane_home = %v, want none", handle[paneHome])
+	}
+}
+
 func TestHerdrStartLoadsGroupEnvFile(t *testing.T) {
 	t.Parallel()
 	wt := seedEmptyRepo(t)

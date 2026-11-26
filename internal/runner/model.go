@@ -92,7 +92,7 @@ func (h *Herdr) SessionID(ctx context.Context, handle map[string]any, startedAt 
 		if err != nil {
 			return "", fmt.Errorf("session index: invalid crew launch timestamp")
 		}
-		return h.indexSession(kind, dir, launchAt, prompt)
+		return h.indexSession(kind, handle, dir, launchAt, prompt)
 	}
 	_, id, err = h.matchSession(kind, handle, startedAt, 0)
 	return id, err
@@ -247,6 +247,30 @@ func (h *Herdr) harnessHome(kind, dir, env string) string {
 	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, dir)
+}
+
+// sessionHome is the harness home an indexed session's files are read
+// from: the test override, else the pane's HOME recorded at its start
+// with dir under it, else the daemon's home (harnessHome). A crew pane's
+// environment may set HOME apart from the daemon's, and the harness
+// writes its index and transcripts there.
+func (h *Herdr) sessionHome(handle map[string]any, kind, dir, env string) string {
+	if set := h.AgentHomes[kind]; set != "" {
+		return set
+	}
+	if home := cleanPaneHome(str(handle, paneHome, "")); home != "" {
+		return filepath.Join(home, dir)
+	}
+	return h.harnessHome(kind, dir, env)
+}
+
+// cleanPaneHome is a recorded pane HOME as the prefix of a session-file
+// glob: absolute and without pattern characters, else "".
+func cleanPaneHome(home string) string {
+	if !filepath.IsAbs(home) || strings.ContainsAny(home, `*?[\`) {
+		return ""
+	}
+	return filepath.Clean(home)
 }
 
 // sessionFile is the session file matching pattern; "" when there is none

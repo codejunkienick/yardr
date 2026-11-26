@@ -171,6 +171,13 @@ func crewPrompt(yardr string, r store.CrewMember, user string) string {
 // it two launches' prompts read alike.
 const launchReference = "launch_reference"
 
+// paneHome is a handle key: the HOME the crew pane started with, when its
+// environment sets one. A crew env_file may set HOME apart from the
+// daemon's, and the harness keeps its index and transcripts there, so the
+// pin lookup and context read of an indexed session resolve it from here
+// (sessionHome). Absent when the pane inherits the daemon's home.
+const paneHome = "pane_home"
+
 // crewSessionReference renders the reference as the first prompt carries it.
 func crewSessionReference(launch string) string { return "Session reference " + launch + "." }
 
@@ -270,6 +277,18 @@ func (h *Herdr) StartCrew(ctx context.Context, r store.CrewMember, user string) 
 	// call). The workspace is not focused: a crew member starts in the
 	// background, under the daemon, not in front of whoever is at herdr.
 	paneEnv := withMemoryOff(kind, withEnvFile(env, secrets))
+	// The pane's HOME, when its environment sets one apart from the
+	// daemon's, is where its harness keeps the index and transcripts an
+	// indexed session is read from; kept on the handle for the pin lookup
+	// and context read. yardr sets YARDR_HOME, not HOME, so only the
+	// env_file or env_command can set it.
+	for _, e := range paneEnv {
+		if k, v, _ := strings.Cut(e, "="); k == "HOME" {
+			if home := cleanPaneHome(v); home != "" {
+				handle[paneHome] = home
+			}
+		}
+	}
 	// Before the agent starts: a home directory's trust never sticks past
 	// the accept, so it is seeded first (see maybeSeedHomeTrust).
 	h.maybeSeedHomeTrust(r.Config, dir, paneEnv)

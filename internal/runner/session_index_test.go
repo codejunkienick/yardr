@@ -23,9 +23,8 @@ func TestHerdrSessionIDIndexed(t *testing.T) {
 		return fmt.Sprintf(`{"type":"USER_INPUT","created_at":%q,"content":%q}`+"\n", at.UTC().Format(time.RFC3339Nano), content)
 	}
 	wrapped := func(prompt string) string { return "<USER_REQUEST>\n" + prompt + "\n</USER_REQUEST>\n<metadata/>" }
-	home := func(t *testing.T, index string, transcripts map[string]string) string {
+	homeAt := func(t *testing.T, home, index string, transcripts map[string]string) {
 		t.Helper()
-		home := t.TempDir()
 		write := func(path, body string) {
 			t.Helper()
 			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -41,6 +40,11 @@ func TestHerdrSessionIDIndexed(t *testing.T) {
 		for id, body := range transcripts {
 			write(filepath.Join(home, "brain", id, ".system_generated", "logs", "transcript.jsonl"), body)
 		}
+	}
+	home := func(t *testing.T, index string, transcripts map[string]string) string {
+		t.Helper()
+		home := t.TempDir()
+		homeAt(t, home, index, transcripts)
 		return home
 	}
 	crew := func(dir string) map[string]any {
@@ -151,6 +155,40 @@ func TestHerdrSessionIDIndexed(t *testing.T) {
 			t.Fatalf("session = %q, %v; want \"\", nil", id, err)
 		}
 	})
+	t.Run("crew resolves the pane's home", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir()) // the daemon's home holds no index
+		pane := t.TempDir()
+		homeAt(t, filepath.Join(pane, ".gemini/antigravity-cli"), `{"/work/crew":"own"}`, map[string]string{"own": own})
+		h := &Herdr{}
+		handle := crew("/work/crew")
+		handle[paneHome] = pane
+		if id, err := askCrew(t, h, handle); id != "own" || err != nil {
+			t.Fatalf("session = %q, %v; want own, nil", id, err)
+		}
+		if id, err := askCrew(t, h, crew("/work/crew")); id != "" || err != nil {
+			t.Fatalf("unrecorded home session = %q, %v; want \"\", nil", id, err)
+		}
+	})
+}
+
+// A recorded pane HOME is the prefix of a session-file glob: absolute and
+// without pattern characters, else no home at all.
+func TestCleanPaneHome(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ in, want string }{
+		{"/home/jo", "/home/jo"},
+		{"/home/jo/", "/home/jo"},
+		{"", ""},
+		{"relative", ""},
+		{"/home/*", ""},
+		{"/home/?.bak", ""},
+		{"/home/[ab]", ""},
+		{"/home/a\\b", ""},
+	} {
+		if got := cleanPaneHome(tc.in); got != tc.want {
+			t.Errorf("cleanPaneHome(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
 }
 
 // Antigravity's first user message wraps the prompt the pane was sent, with
