@@ -857,6 +857,9 @@ func (h *Harness) Check() error {
 		if err := h.Session.check(); err != nil {
 			return fmt.Errorf("session: %w", err)
 		}
+		if h.Session.Index == nil && h.Model == nil {
+			return fmt.Errorf("session: without an index or a model source there is no session id to read it by")
+		}
 	}
 	if len(h.Usage) > 0 && h.Model == nil {
 		return fmt.Errorf("usage: without a model source there is no session file to read it from")

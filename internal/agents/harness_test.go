@@ -723,6 +723,7 @@ func TestLoadRefuses(t *testing.T) {
 		"session, empty field key":            {"claude.yaml", "version: 1\nlabel: x\nsession: {home: .x, glob: '{session}.jsonl', index: {file: index.json, field: a..b, at: t}}\n", "empty key"},
 		"session, index at_unit":              {"claude.yaml", "version: 1\nlabel: x\nsession: {home: .x, glob: '{session}.jsonl', index: {file: index.json, field: ., at: t, at_unit: h}}\n", `index: at_unit "h" is none of s, ms, us`},
 		"session, unknown field":              {"claude.yaml", "version: 1\nlabel: x\nsession: {home: .x, glob: '{session}.jsonl', index: {file: index.json, field: ., at: t, latest: true}}\n", "field latest not found"},
+		"session, no index or model":          {"claude.yaml", "version: 1\nlabel: x\nsession: {home: .x, glob: '{session}.jsonl'}\n", "no session id to read it by"},
 		"a nameless preset":                   {"claude.yaml", "version: 1\nlabel: x\nflags: {permissions: [{args: [--yes]}]}\n", "without label or args"},
 		"model flag is not a flag":            {"claude.yaml", "version: 1\nlabel: x\nflags: {model: model}\n", "is not a flag"},
 		"model_env, no var":                   {"claude.yaml", "version: 1\nlabel: x\nflags: {model_env: {value: '{model}'}}\n", "flags.model_env.var: the variable that carries the model is needed"},
@@ -1214,7 +1215,7 @@ func TestContextSource(t *testing.T) {
 // half read.
 func TestContextSourceChecked(t *testing.T) {
 	model := "model:\n  home: .x\n  glob: s/{session}.jsonl\n  field: m.model\n"
-	session := "session:\n  home: .x\n  glob: s/{session}.jsonl\n"
+	session := "session:\n  home: .x\n  glob: s/{session}.jsonl\n  index:\n    file: index.json\n    field: .\n    at: at\n"
 	for name, body := range map[string]string{
 		"no usage":              "version: 1\nlabel: Q\n" + model + "context:\n  type: assistant\n",
 		"no model":              "version: 1\nlabel: Q\ncontext:\n  type: assistant\n  usage: message.usage\n",
@@ -1242,7 +1243,12 @@ func TestContextSourceChecked(t *testing.T) {
 	}
 	if _, err := load(t, map[string]string{"qwen.yaml": "version: 1\nlabel: Q\n" + session +
 		"context:\n  type: PLANNER_RESPONSE\n  usage: .\n"}); err != nil {
-		t.Fatalf("a source on a session locator is refused: %v", err)
+		t.Fatalf("a source on an indexed session locator is refused: %v", err)
+	}
+	if _, err := load(t, map[string]string{"qwen.yaml": "version: 1\nlabel: Q\n" +
+		"session:\n  home: .x\n  glob: s/{session}.jsonl\n" +
+		"context:\n  type: PLANNER_RESPONSE\n  usage: .\n"}); err == nil {
+		t.Fatalf("a source on a session locator with no index or model loaded")
 	}
 	if hs, err := load(t, map[string]string{"qwen.yaml": "version: 1\nlabel: Q\n" + model +
 		"context:\n  usage: message.usage\n  window: 123456\n"}); err != nil || hs[0].Context.Window != 123456 {
