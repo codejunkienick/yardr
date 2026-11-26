@@ -2,6 +2,8 @@ package runner
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -162,6 +164,33 @@ func crewPrompt(yardr string, r store.CrewMember, user string) string {
 	return fmt.Sprintf(CrewPromptLead+" %s. %s %s "+CrewPromptEnd, who, run, prime)
 }
 
+// launchReference is a handle key: the unique reference of a crew launch,
+// carried in the first prompt of a kind whose transcript is found by a
+// live index, so the pinned conversation is verified as this launch's own
+// (SessionID). Several panes can share the member's directory, and without
+// it two launches' prompts read alike.
+const launchReference = "launch_reference"
+
+// crewSessionReference renders the reference as the first prompt carries it.
+func crewSessionReference(launch string) string { return "Session reference " + launch + "." }
+
+// withLaunchReference gives the first prompt of a crew session of kind a
+// launch reference, kept on the handle beside it, when the kind locates
+// its transcript by a live index. Other kinds start as they always did.
+func withLaunchReference(kind, prompt string, handle map[string]any) (string, error) {
+	h, _ := agents.Lookup(kind)
+	if h.Session == nil || h.Session.Index == nil {
+		return prompt, nil
+	}
+	var raw [8]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", fmt.Errorf("crew launch reference: %w", err)
+	}
+	launch := hex.EncodeToString(raw[:])
+	handle[launchReference] = launch
+	return crewSessionReference(launch) + " " + prompt, nil
+}
+
 // StartCrew opens a herdr workspace in the crew member's directory, with
 // its identity in the environment, starts its agent and points it at its
 // prime: the line session ("") or the conversation session for user, on
@@ -276,9 +305,12 @@ func (h *Herdr) StartCrew(ctx context.Context, r store.CrewMember, user string) 
 	if extra := agentArgs(r.Config, "", h.YardHome, dir, tmp); len(extra) > 0 {
 		start = append(append(start, "--"), extra...)
 	}
-	prompt := crewPrompt(h.yard(), r, user)
+	prompt, err := withLaunchReference(kind, crewPrompt(h.yard(), r, user), handle)
+	if err != nil {
+		return handle, err
+	}
 	handle[firstPrompt] = prompt
-	// CrewStartedFor records its time after Muse can write its session metadata.
+	// CrewStartedFor records its time after the harness can write its first transcript line.
 	handle[contextStartedAt] = time.Now().UTC().Format(time.RFC3339Nano)
 	return h.startAgent(ctx, start, name, prompt, handle, trustEntry(r.Config), keyEntry(r.Config),
 		onboardingEntries(r.Config))

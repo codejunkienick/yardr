@@ -265,6 +265,35 @@ func TestFirstPromptNamesConversationPersonAndSlice(t *testing.T) {
 	}
 }
 
+// A crew session whose kind locates its transcript by a live index carries
+// a unique launch reference in its first prompt, kept on the handle beside
+// it, so the pinned conversation is verified as this launch's own. Other
+// kinds start as they always did.
+func TestFirstPromptCarriesLaunchReference(t *testing.T) {
+	t.Parallel()
+	plain := crewPrompt("yardr", store.CrewMember{Name: "yardmaster"}, "")
+	handle := map[string]any{}
+	got, err := withLaunchReference("agy", plain, handle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	launch, _ := handle[launchReference].(string)
+	if len(launch) != 16 || strings.Trim(launch, "0123456789abcdef") != "" {
+		t.Fatalf("reference = %q, want 16 hex chars", launch)
+	}
+	if want := crewSessionReference(launch) + " " + plain; got != want {
+		t.Errorf("prompt = %q, want %q", got, want)
+	}
+	again, err := withLaunchReference("agy", plain, map[string]any{})
+	if err != nil || again == got {
+		t.Fatalf("a second launch repeats the reference: %q, %v", again, err)
+	}
+	handle = map[string]any{}
+	if got, err := withLaunchReference("claude", plain, handle); err != nil || got != plain || len(handle) != 0 {
+		t.Fatalf("a model-located kind got %q, %+v, %v; want the prompt untouched", got, handle, err)
+	}
+}
+
 // Found live (yardr-85jy): a Codex left at its folder-trust dialog got its
 // first prompt from the dispatcher in the second a person answered the
 // dialog, and dropped the keys; the prompt was cleared as delivered and the

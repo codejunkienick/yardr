@@ -39,7 +39,8 @@ const contextCacheCap = 200
 // use and window its own session file holds, by the kind's context source
 // (store.ContextSource). ok is false when the kind names no source, or
 // the file says no use yet (no reply, or none with numbers). The file is
-// found as the model source's is (see Model).
+// found as the model source's is (see Model), or, for an indexed session
+// locator, only by the conversation id pinned on the handle.
 //
 // The daemon asks on each pass that reaches its context read, so both
 // halves are remembered across calls: the transcript is pinned while its
@@ -52,6 +53,27 @@ func (h *Herdr) Context(ctx context.Context, handle map[string]any, startedAt ti
 	kind, id, err := h.contextKind(ctx, handle, startedAt)
 	if err != nil {
 		return 0, 0, false, err
+	}
+	if kind.Kind == "" {
+		// As matchSession resolves it: herdr named no agent, so the
+		// handle's own kind says what the pin below is under.
+		if name, _ := handle[harnessKind].(string); name != "" {
+			kind, _ = agents.Lookup(name)
+		}
+	}
+	if src := kind.SessionFile(); src != nil && src.Index != nil && kind.Context != nil {
+		// An indexed locator is read only by the conversation id pinned
+		// on the handle: the index is live, and may already name another
+		// session's conversation. An unpinned session has no reading.
+		id, _ := handle[agentSession].(string)
+		if !plainSessionID(id) || id == "." || id == ".." {
+			return 0, 0, false, nil
+		}
+		p, err := sessionFile(src.Pattern(h.harnessHome(kind.Kind, src.Home, src.HomeEnv), id))
+		if p == "" || err != nil {
+			return 0, 0, false, err
+		}
+		return h.cachedContext(p, *kind.Context)
 	}
 	// wide is the glob of every file a match judges, "" for an id herdr named.
 	var path, key, wide string
@@ -75,13 +97,6 @@ func (h *Herdr) Context(ctx context.Context, handle map[string]any, startedAt ti
 				if err != nil {
 					return 0, 0, false, err
 				}
-			}
-		}
-		if kind.Kind == "" {
-			// As matchSession resolves it: herdr named no agent, so the
-			// handle's own kind says what the pin below is under.
-			if name, _ := match[harnessKind].(string); name != "" {
-				kind, _ = agents.Lookup(name)
 			}
 		}
 		key = contextMatchKey(kind, match, startedAt)

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -62,14 +63,40 @@ func (h *Herdr) Model(ctx context.Context, handle map[string]any, startedAt time
 // SessionID is the session id of the agent handle names, by which its own
 // session file is found: what herdr reports for the pane, or, when herdr
 // names no id and the kind declares a workspace, the worktree match's
-// (matchWorkspace). "" while there is none: the agent has not started its
-// session, is gone, or its file matches nothing yet. It is where Model and
-// Context start, without their reading of the file, so an agent that has
-// not answered yet, or whose kind names no model, has its id all the same.
+// (matchWorkspace), or, when its session locator names an index, the
+// index's id for the worktree or verified crew directory (indexSession).
+// "" while there is none: the agent has not started its session, is gone,
+// or its file matches nothing yet. It is where Model and Context start,
+// without their reading of the file, so an agent that has not answered
+// yet, or whose kind names no model, has its id all the same.
 func (h *Herdr) SessionID(ctx context.Context, handle map[string]any, startedAt time.Time) (string, error) {
 	kind, id, err := h.sessionKind(ctx, handle)
 	if err != nil || id != "" {
 		return id, err
+	}
+	if kind.Kind == "" {
+		if name, _ := handle[harnessKind].(string); name != "" {
+			kind, _ = agents.Lookup(name)
+		}
+	}
+	if src := kind.SessionFile(); src != nil && src.Index != nil {
+		worktree, _ := handle["worktree"].(string)
+		if worktree != "" {
+			return h.indexSession(kind, worktree, startedAt, "")
+		}
+		dir, _ := handle["dir"].(string)
+		launch, _ := handle[launchReference].(string)
+		prompt, _ := handle[firstPrompt].(string)
+		if dir == "" || launch == "" || !strings.Contains(prompt, crewSessionReference(launch)) {
+			return "", nil
+		}
+		// agy can log the first prompt before the dispatcher records the start.
+		text, _ := handle[contextStartedAt].(string)
+		launchAt, err := time.Parse(time.RFC3339Nano, text)
+		if err != nil {
+			return "", fmt.Errorf("session index: invalid crew launch timestamp")
+		}
+		return h.indexSession(kind, dir, launchAt, prompt)
 	}
 	_, id, err = h.matchSession(kind, handle, startedAt, 0)
 	return id, err
@@ -209,14 +236,21 @@ func plainSessionID(id string) bool {
 // model source: set (tests), else the one the agent's environment variable
 // names, else its directory in the user's home.
 func (h *Herdr) agentHome(kind store.Harness) string {
-	if set := h.AgentHomes[kind.Kind]; set != "" {
+	return h.harnessHome(kind.Kind, kind.Model.Home, kind.Model.HomeEnv)
+}
+
+// harnessHome is the own directory of an agent of kind, whose file names
+// its home at dir, moved by the variable env names: set (tests), else the
+// one the variable names, else its directory in the user's home.
+func (h *Herdr) harnessHome(kind, dir, env string) string {
+	if set := h.AgentHomes[kind]; set != "" {
 		return set
 	}
-	if p := os.Getenv(kind.Model.HomeEnv); kind.Model.HomeEnv != "" && p != "" {
+	if p := os.Getenv(env); env != "" && p != "" {
 		return p
 	}
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, kind.Model.Home)
+	return filepath.Join(home, dir)
 }
 
 // sessionFile is the session file matching pattern; "" when there is none

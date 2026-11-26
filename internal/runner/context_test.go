@@ -861,6 +861,64 @@ esac`)
 		}
 	})
 
+	t.Run("agy", func(t *testing.T) {
+		home := t.TempDir()
+		started := time.Date(2026, 11, 24, 10, 41, 0, 0, time.UTC)
+		h := &Herdr{AgentHomes: map[string]string{"agy": home}, Bin: fakeHerdrBin(t, `echo '{"result":{"agent":{"agent":"agy","agent_status":"idle"}}}'`)}
+		handle := map[string]any{"agent": "crew", "kind": "agy", "dir": "/work/crew", "agent_session": "own"}
+		path := filepath.Join(home, "brain", "own", ".system_generated", "logs", "transcript.jsonl")
+		response := func(model string, input, cache int) string {
+			return fmt.Sprintf("{\"type\":\"PLANNER_RESPONSE\",\"model\":%q,\"input_tokens\":%d,\"cache_read_tokens\":%d}\n", model, input, cache)
+		}
+		check := func(t *testing.T, reader *Herdr, handle map[string]any, wantUsed, wantWindow int) {
+			t.Helper()
+			used, window, ok, err := reader.Context(ctx, handle, started)
+			if err != nil || used != wantUsed || window != wantWindow || ok != (wantWindow != 0) {
+				t.Fatalf("context = %d, %d, %v, %v; want %d, %d, %v, nil", used, window, ok, err, wantUsed, wantWindow, wantWindow != 0)
+			}
+		}
+		t.Run("only pinned", func(t *testing.T) {
+			prompt := `{"type":"USER_INPUT","created_at":"2026-11-24T10:41:08Z","content":"go on"}` + "\n"
+			write(path, prompt+response("gemini-4-hydrogen-high", 100, 900))
+			write(filepath.Join(home, "brain", "other", ".system_generated", "logs", "transcript.jsonl"),
+				prompt+response("gemini-4-hydrogen-high", 100, 659900))
+			write(filepath.Join(home, "cache", "last_conversations.json"), `{"/work/crew":"other"}`)
+			check(t, h, handle, 1000, 1048576)
+			unpinned := maps.Clone(handle)
+			delete(unpinned, "agent_session")
+			check(t, h, unpinned, 0, 0)
+			write(filepath.Join(home, "cache", "last_conversations.json"), `null`)
+			check(t, h, unpinned, 0, 0)
+			check(t, h, handle, 1000, 1048576)
+		})
+		t.Run("response model carries its own window", func(t *testing.T) {
+			write(path, response("gemini-4-hydrogen-high", 100, 659900))
+			check(t, h, handle, 660000, 1048576)
+			appendLine(t, path, response("gemini-4-neon-medium", 100, 319900))
+			check(t, h, handle, 320000, 524288)
+			appendLine(t, path, response("unknown-model", 100, 400000))
+			check(t, h, handle, 0, 0)
+			appendLine(t, path, response("gemini-4-neon-low", 100, 21900))
+			check(t, h, handle, 22000, 524288)
+			appendLine(t, path, `{"type":"PLANNER_RESPONSE","input_tokens":100,"cache_read_tokens":900000}`+"\n")
+			check(t, h, handle, 0, 0)
+		})
+		t.Run("compact and stop", func(t *testing.T) {
+			write(path, response("gemini-4-hydrogen-high", 100, 659900))
+			check(t, h, handle, 660000, 1048576)
+			appendLine(t, path, `{"type":"CHECKPOINT","input_tokens":100,"cache_read_tokens":659900,"output_tokens":4100}`+"\n")
+			check(t, &Herdr{AgentHomes: h.AgentHomes, Bin: h.Bin}, handle, 0, 0)
+			check(t, h, handle, 0, 0)
+			check(t, h, handle, 0, 0)
+			appendLine(t, path, `{"type":"USER_INPUT","content":"go on"}`+"\n")
+			check(t, h, handle, 0, 0)
+			appendLine(t, path, response("gemini-4-hydrogen-high", 100, 21900))
+			check(t, h, handle, 22000, 1048576)
+			appendLine(t, path, `{"type":"CHECKPOINT"}`+"\n")
+			check(t, h, handle, 0, 0)
+		})
+	})
+
 	t.Run("concurrent sessions read side by side", func(t *testing.T) {
 		home := t.TempDir()
 		startedAt := time.Date(2026, 11, 10, 20, 0, 0, 0, time.UTC)
