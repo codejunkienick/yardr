@@ -127,12 +127,12 @@ func envKeys(env []string) []string {
 // model, context use and tokens are read from: the directory (moved by the
 // variable the file names, if it names one) and the glob that finds the
 // session's file in it.
-func sessionFiles(m *store.ModelSource) string {
-	dir := "~/" + m.Home
-	if m.HomeEnv != "" {
-		dir += " (or $" + m.HomeEnv + ")"
+func sessionFiles(home, env, glob string) string {
+	dir := "~/" + home
+	if env != "" {
+		dir += " (or $" + env + ")"
 	}
-	return dir + "/" + m.Glob
+	return dir + "/" + glob
 }
 
 // lineOf names a line of a session file by its type: any line for no type,
@@ -312,23 +312,36 @@ func printHarness(w io.Writer, h store.Harness, has bool) {
 	if m := h.Model; m == nil {
 		fmt.Fprintln(w, "  no source known: nothing is recorded and nothing compared")
 	} else {
-		fmt.Fprintf(w, "  %s: %s of the first %s that names one\n", sessionFiles(m), m.Field, lineOf(m.Type, m.TypeField))
+		fmt.Fprintf(w, "  %s: %s of the first %s that names one\n", sessionFiles(m.Home, m.HomeEnv, m.Glob), m.Field, lineOf(m.Type, m.TypeField))
 	}
-	// The loader refuses a context or usage with no model source, so the
-	// file they are read from is the model's.
-	if c := h.Context; c != nil {
+	// Context reads the session file the session locator names, else the
+	// model source's; the loader refuses one with neither.
+	if c, src := h.Context, h.SessionFile(); c != nil && src != nil {
 		tokens := c.Tokens
 		if len(tokens) == 0 {
 			tokens = store.DefaultContextTokens
 		}
 		fmt.Fprintln(w, "\nThe context its agent holds: a crew member is asked for a handoff at its --context-handoff percent of the window")
 		fmt.Fprintf(w, "  %s: %s at %s of the last %s that has any of them\n",
-			sessionFiles(h.Model), strings.Join(tokens, " + "), c.Usage, lineOf(c.Type, c.TypeField))
+			sessionFiles(src.Home, src.HomeEnv, src.Glob), strings.Join(tokens, " + "), c.Usage, lineOf(c.Type, c.TypeField))
 		if c.Window > 0 {
 			fmt.Fprintf(w, "  window: %d tokens\n", c.Window)
 		}
 		if c.WindowField != "" {
 			fmt.Fprintf(w, "  window: from %s of the same line; no reading until it is present\n", c.WindowField)
+		}
+		if c.ModelField != "" {
+			fmt.Fprintf(w, "  window: from the declared capacities for the model at %s of the same line\n", c.ModelField)
+		}
+		if c.ResetType != "" {
+			fmt.Fprintf(w, "  clear the reading on %s\n", lineOf(c.ResetType, c.TypeField))
+		}
+	}
+	if src := h.Session; src != nil {
+		fmt.Fprintln(w, "\nSession file locator")
+		fmt.Fprintf(w, "  %s\n", sessionFiles(src.Home, src.HomeEnv, src.Glob))
+		if idx := src.Index; idx != nil {
+			fmt.Fprintf(w, "  index: %s, exact directory key, id at %s; pinned on a live pass, never after the end, when the transcript's first %s is at or after the session's start, and for a crew session its first prompt\n", sessionFiles(src.Home, src.HomeEnv, idx.File), idx.Field, idx.At)
 		}
 	}
 	if len(h.Usage) > 0 {
@@ -337,7 +350,7 @@ func printHarness(w io.Writer, h store.Harness, has bool) {
 			head += ": the first entry that finds a line is the reading"
 		}
 		fmt.Fprintln(w, head)
-		fmt.Fprintf(w, "  %s\n", sessionFiles(h.Model))
+		fmt.Fprintf(w, "  %s\n", sessionFiles(h.Model.Home, h.Model.HomeEnv, h.Model.Glob))
 		for i, u := range h.Usage {
 			lines, counts, at := usageEntry(u)
 			fmt.Fprintf(w, "  %d. %s\n     counts: %s\n     time:   %s\n", i+1, lines, counts, at)

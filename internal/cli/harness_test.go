@@ -33,6 +33,7 @@ func TestHarnessListAndShow(t *testing.T) {
 		"codex     Codex        v1    pane marks, error lines, dialogs told of, reported model, context use, token count, trust dialog, unattended flags, model flag, effort flag, flags always passed,",
 		"muse      Muse Code    v1    pane marks, error lines, login screen, background work, reported model, context use, token count, trust dialog, unattended flags,",
 		"kimi      Kimi         v1    pane marks, error lines, dialogs told of, hints, trust dialog, trust environment, unattended flags,",
+		"agy       Antigravity  v1    pane marks, error lines, context use, trust dialog, model flag, effort flag, permission presets, version flag, one-shot call",
 		"pi        pi           v1    error lines, reported model, context use, model flag, version flag, one-shot call\n",
 		"opencode  opencode     v1    model environment, permission presets, version flag, one-shot call, where to get it",
 		"No file, so started as herdr starts it and nothing more known: gemini, cursor,")
@@ -173,6 +174,12 @@ func TestHarnessListAndShow(t *testing.T) {
 		`permission "always approve": --dangerously-skip-permissions`,
 		"none named: --model takes any id",
 		"no source known: nothing is recorded and nothing compared",
+		"The context its agent holds: a crew member is asked for a handoff at its --context-handoff percent of the window",
+		"~/.gemini/antigravity-cli/brain/{session}/.system_generated/logs/transcript.jsonl: input_tokens + cache_read_tokens at . of the last line of type PLANNER_RESPONSE that has any of them",
+		"window: from the declared capacities for the model at model of the same line",
+		"clear the reading on line of type CHECKPOINT",
+		"Session file locator", "~/.gemini/antigravity-cli/brain/{session}/.system_generated/logs/transcript.jsonl",
+		"index: ~/.gemini/antigravity-cli/cache/last_conversations.json, exact directory key, id at .; pinned on a live pass, never after the end, when the transcript's first created_at is at or after the session's start, and for a crew session its first prompt",
 		"rate_limited  ^Individual quota reached")
 	wantText(t, ask(0, "harness", "show", "claude"), "claude  Claude Code, by Anthropic  (harnesses/claude.yaml, version 1)")
 	wantText(t, ask(0, "harness", "show", "pi"), "effort:     none: a group of this kind takes no effort=", "Models it offers", "none named: --model takes any id",
@@ -209,7 +216,7 @@ func TestHarnessListAndShow(t *testing.T) {
 		"kind": "(harnesses/", "version": ", version ", "label": "(harnesses/", "provider": ", by ",
 		"aliases": "also asked for as: ", "install": "get it: ", "fetch": "on a Mac without a terminal: version ",
 		"trust": "trust: yardr answers", "marks": "Marks its pane is read by", "flags": "Flags\n",
-		"offers": "Models it offers", "model": "The model its agent reports", "context": "The context its agent holds",
+		"offers": "Models it offers", "session": "Session file locator", "model": "The model its agent reports", "context": "The context its agent holds",
 		"usage": "Tokens a session used", "errors": "Error lines it stops on", "dialogs": "Dialogs it draws",
 		"login": "Login screen", "login_recipe": "Login led by a program", "login_env": "API key it runs with",
 		"api_key": "Use-this-API-key dialog", "onboarding": "First-start screens", "background": "Background work",

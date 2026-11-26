@@ -46,12 +46,15 @@ type Harness struct {
 	// Offers are the models the file suggests a person pick: a list to
 	// choose from, not what is installed, which Models lists live. nil
 	// when the file names none.
-	Offers []Offer      `yaml:"offers" json:"offers,omitempty"`
-	Model  *ModelSource `yaml:"model" json:"model,omitempty"`
+	Offers []Offer `yaml:"offers" json:"offers,omitempty"`
+	// Session locates the agent's own session file where the kind
+	// declares no model source; nil when the model source names it.
+	Session *SessionSource `yaml:"session" json:"session,omitempty"`
+	Model   *ModelSource   `yaml:"model" json:"model,omitempty"`
 	// Context is where the context use of a session's agent is read: the
-	// same session file the model source names, read for its last use.
-	// nil when the file names none, and the kind has no context-based
-	// rotation.
+	// same session file the session locator or model source names, read
+	// for its last use. nil when the file names none, and the kind has
+	// no context-based rotation.
 	Context *ContextSource `yaml:"context" json:"context,omitempty"`
 	// Usage is where the tokens a whole session used are read: the same
 	// session file the model source names, once the session has ended. The
@@ -337,22 +340,26 @@ const sessionID = "{session}"
 var DefaultContextTokens = []string{"input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"}
 
 // ContextSource is where the context use of a session's agent is read:
-// the agent's own session file, the one the model source names for the
-// session id herdr reports. The use is the numbers at Usage, a path of
-// keys joined by dots to an object, in the last line whose type is Type
-// (any line, for no Type) that has one. Tokens are the fields of that
-// object that add up to what the session holds, DefaultContextTokens
-// when the file names none. The type is read from the dot path TypeField
-// names, "type" when the file names none.
+// the agent's own session file, the one the session locator or model
+// source names. The use is the numbers at Usage, a path of keys joined
+// by dots to an object, or "." for the line itself, in the last line
+// whose type is Type (any line, for no Type) that has one. Tokens are
+// the fields of that object that add up to what the session holds,
+// DefaultContextTokens when the file names none. The type is read from
+// the dot path TypeField names, "type" when the file names none.
 type ContextSource struct {
 	Type      string   `yaml:"type" json:"type,omitempty"`
 	TypeField string   `yaml:"type_field" json:"type_field,omitempty"`
+	ResetType string   `yaml:"reset_type" json:"reset_type,omitempty"` // Clears the last reading.
 	Usage     string   `yaml:"usage" json:"usage"`
 	Tokens    []string `yaml:"tokens" json:"tokens,omitempty"`
 	// Window is the kind's context window in tokens, 0 for the model's.
 	Window int `yaml:"window" json:"window,omitempty"`
 	// WindowField reads the window from the same line as Usage, instead of Window.
 	WindowField string `yaml:"window_field" json:"window_field,omitempty"`
+	// ModelField reads the active model from the usage line and looks up its exact id in ModelWindows.
+	ModelField   string         `yaml:"model_field" json:"model_field,omitempty"`
+	ModelWindows map[string]int `yaml:"model_windows" json:"model_windows,omitempty"`
 }
 
 // UsageSource is where the tokens a whole session used are read: the agent's
@@ -819,10 +826,12 @@ func (h *Harness) Check() error {
 	}
 	if c := h.Context; c != nil {
 		switch {
-		case h.Model == nil:
-			return fmt.Errorf("context: without a model source there is no session file to read it from")
+		case h.Model == nil && h.Session == nil:
+			return fmt.Errorf("context: without a model source or session locator there is no session file to read it from")
 		case c.Usage == "":
 			return fmt.Errorf("context: usage is needed, the path to the use its lines hold")
+		case c.ResetType != "" && (c.Type == "" || c.ResetType == c.Type):
+			return fmt.Errorf("context: reset_type needs a distinct usage type")
 		case slices.Contains(c.Tokens, ""):
 			return fmt.Errorf("context: tokens names an empty field")
 		case c.Window < 0:
@@ -831,6 +840,22 @@ func (h *Harness) Check() error {
 			return fmt.Errorf("context: window and window_field cannot both be set")
 		case c.WindowField != "" && slices.Contains(strings.Split(c.WindowField, "."), ""):
 			return fmt.Errorf("context: window_field names an empty key")
+		case (c.ModelField != "") != (len(c.ModelWindows) > 0):
+			return fmt.Errorf("context: model_field and model_windows are needed together")
+		case c.ModelField != "" && (c.Window != 0 || c.WindowField != ""):
+			return fmt.Errorf("context: model_windows cannot be combined with window or window_field")
+		case c.ModelField != "" && slices.Contains(strings.Split(c.ModelField, "."), ""):
+			return fmt.Errorf("context: model_field names an empty key")
+		}
+		for id, window := range c.ModelWindows {
+			if id == "" || window <= 0 {
+				return fmt.Errorf("context: model_windows needs model ids and positive windows")
+			}
+		}
+	}
+	if h.Session != nil {
+		if err := h.Session.check(); err != nil {
+			return fmt.Errorf("session: %w", err)
 		}
 	}
 	if len(h.Usage) > 0 && h.Model == nil {

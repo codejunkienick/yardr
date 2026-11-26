@@ -3,6 +3,73 @@ version: 1
 label: Antigravity
 provider: Google
 
+# agy records the last conversation id for each exact directory path in
+# this JSON object. herdr reports no id, and the transcript names no
+# directory, so the dispatcher pins the id on a live pass, never after
+# the session ends. Its first timed line must be at or after the launch's
+# start floored to a second, so a record an earlier session left is no
+# match. Crews verify the launch-specific first prompt in that
+# transcript's first USER_INPUT, since multiple panes can open
+# conversations in the same directory. Context reads only the pinned
+# transcript. An unpinned session has no reading.
+session:
+  home: .gemini/antigravity-cli
+  glob: brain/{session}/.system_generated/logs/transcript.jsonl
+  index:
+    file: cache/last_conversations.json
+    field: .
+    at: created_at
+
+# Context use is the last PLANNER_RESPONSE line's input and cache-read
+# tokens, which add up to what the session holds: input excludes the cache
+# (the cache reaches ~500k while input stays a few thousand), and their sum
+# climbs to each compaction. CHECKPOINT clears the reading: any counts it
+# holds are for the compaction call, and bare /compact can stop there. In
+# agy 1.5.17 transcripts the first response after counted checkpoints used
+# 12,142–29,071 input and cache-read tokens. Recent responses name the model,
+# and none names the window; each group below names the primary source its
+# windows come from. A missing or unknown model gives no reading: the
+# orchestrator ids name none, since no source states the window of their
+# planner/executor pairing. A crew that needs handoff before auto-compaction
+# sets AGY_CLI_AUTO_COMPACT_OVERRIDE above the handoff threshold for its window.
+context:
+  type: PLANNER_RESPONSE
+  reset_type: CHECKPOINT
+  usage: .
+  tokens: [input_tokens, cache_read_tokens]
+  model_field: model
+  model_windows:
+    # The CLI status line docs: 1,048,576.
+    gemini-4-argon-low: 1048576
+    gemini-4-argon-medium: 1048576
+    gemini-4-argon-high: 1048576
+    # DeepMind's Carbon and Hydrogen model cards: 1M.
+    gemini-4-carbon-low: 1048576
+    gemini-4-carbon-medium: 1048576
+    gemini-4-carbon-high: 1048576
+    gemini-4-hydrogen-low: 1048576
+    gemini-4-hydrogen-medium: 1048576
+    gemini-4-hydrogen-high: 1048576
+    gemini-4-hydrogen-xhigh: 1048576
+    # The Antigravity model guide: up to 512K in Antigravity.
+    gemini-4-neon-low: 524288
+    gemini-4-neon-medium: 524288
+    gemini-4-neon-high: 524288
+    gemini-4-neon-xhigh: 524288
+    # Google Cloud's Gemini 3.8 Flash developer's guide: 1,048,576.
+    gemini-3.8-flash-low: 1048576
+    gemini-3.8-flash-medium: 1048576
+    gemini-3.8-flash-high: 1048576
+    # Anthropic's models overview: a 1M-token window.
+    claude-opus-5-5-low: 1000000
+    claude-opus-5-5-medium: 1000000
+    claude-opus-5-5-high: 1000000
+    claude-sonnet-5-5-low: 1000000
+    claude-sonnet-5-5-medium: 1000000
+    claude-sonnet-5-5-high: 1000000
+    # OpenAI's API model docs: a 131,072 context window.
+    gpt-oss-120b-medium: 131072
+
 # agy asks whether a folder is trusted the first time it is started in
 # it: yardr answers it (internal/runner/trust.go). The dialog is its
 # question, the answer the one that accepts it, as agy 1.5.14 prints

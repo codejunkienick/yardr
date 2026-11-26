@@ -624,17 +624,16 @@ func (h *Herdr) cachedContext(path string, source store.ContextSource) (used, wi
 	}
 	var readErr error
 	end, err := eachLineFrom(path, start, func(line []byte) bool {
-		n, w, has, e := source.ReadIn(line)
+		n, w, has, reset, e := source.ReadIn(line)
 		if e != nil {
 			readErr = e
 			return true
 		}
-		if has {
+		// A reset or newer usage with no known window clears the older sample.
+		if reset || has && w == 0 && (source.WindowField != "" || source.ModelField != "") {
+			used, window, ok = 0, 0, false
+		} else if has {
 			used, window, ok = n, w, true
-			if source.WindowField != "" && w == 0 {
-				// A newer call without its window cannot reuse an older reading.
-				used, window, ok = 0, 0, false
-			}
 		}
 		return false
 	})

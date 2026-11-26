@@ -714,6 +714,15 @@ func TestLoadRefuses(t *testing.T) {
 		"trust env, bad key":                  {"claude.yaml", "version: 1\nlabel: x\ntrust: {dialog: 'Trust?', answers: ['Yes'], cursor: '>', env: ['1BAD=x']}\n", "trust.env: entry 1: want KEY=VALUE"},
 		"any session's":                       {"claude.yaml", "version: 1\nlabel: x\nmodel: {home: .x, glob: 'a/*.jsonl', field: model}\n", "has no {session}"},
 		"model, no field":                     {"claude.yaml", "version: 1\nlabel: x\nmodel: {home: .x, glob: '{session}.jsonl'}\n", "home and field are needed"},
+		"session, no home":                    {"claude.yaml", "version: 1\nlabel: x\nsession: {glob: '{session}.jsonl'}\n", "home is needed"},
+		"session, no id":                      {"claude.yaml", "version: 1\nlabel: x\nsession: {home: .x, glob: '*.jsonl'}\n", "glob has no {session}"},
+		"session, glob escapes":               {"claude.yaml", "version: 1\nlabel: x\nsession: {home: .x, glob: '../{session}.jsonl'}\n", "glob must stay"},
+		"session, index no field":             {"claude.yaml", "version: 1\nlabel: x\nsession: {home: .x, glob: '{session}.jsonl', index: {file: index.json, at: t}}\n", "file, field and at are needed"},
+		"session, index no time":              {"claude.yaml", "version: 1\nlabel: x\nsession: {home: .x, glob: '{session}.jsonl', index: {file: index.json, field: .}}\n", "file, field and at are needed"},
+		"session, index escape":               {"claude.yaml", "version: 1\nlabel: x\nsession: {home: .x, glob: '{session}.jsonl', index: {file: ../index.json, field: ., at: t}}\n", "file must stay"},
+		"session, empty field key":            {"claude.yaml", "version: 1\nlabel: x\nsession: {home: .x, glob: '{session}.jsonl', index: {file: index.json, field: a..b, at: t}}\n", "empty key"},
+		"session, index at_unit":              {"claude.yaml", "version: 1\nlabel: x\nsession: {home: .x, glob: '{session}.jsonl', index: {file: index.json, field: ., at: t, at_unit: h}}\n", `index: at_unit "h" is none of s, ms, us`},
+		"session, unknown field":              {"claude.yaml", "version: 1\nlabel: x\nsession: {home: .x, glob: '{session}.jsonl', index: {file: index.json, field: ., at: t, latest: true}}\n", "field latest not found"},
 		"a nameless preset":                   {"claude.yaml", "version: 1\nlabel: x\nflags: {permissions: [{args: [--yes]}]}\n", "without label or args"},
 		"model flag is not a flag":            {"claude.yaml", "version: 1\nlabel: x\nflags: {model: model}\n", "is not a flag"},
 		"model_env, no var":                   {"claude.yaml", "version: 1\nlabel: x\nflags: {model_env: {value: '{model}'}}\n", "flags.model_env.var: the variable that carries the model is needed"},
@@ -1104,6 +1113,34 @@ func TestContextSource(t *testing.T) {
 			}
 			continue
 		}
+		if h.Kind == "agy" {
+			windows := map[string]int{}
+			if h.Context != nil {
+				windows = h.Context.ModelWindows
+			}
+			if h.Context == nil || h.Context.Type != "PLANNER_RESPONSE" || h.Context.Usage != "." ||
+				!slices.Equal(h.Context.Tokens, []string{"input_tokens", "cache_read_tokens"}) ||
+				h.Context.ResetType != "CHECKPOINT" || h.Context.ModelField != "model" || h.Context.Window != 0 ||
+				len(windows) != 24 || windows["gemini-4-hydrogen-high"] != 1048576 || windows["gemini-4-neon-medium"] != 524288 ||
+				windows["gemini-3.8-flash-low"] != 1048576 || windows["claude-opus-5-5-high"] != 1000000 ||
+				windows["claude-sonnet-5-5-medium"] != 1000000 || windows["gpt-oss-120b-medium"] != 131072 {
+				t.Fatalf("agy's context source = %+v", h.Context)
+			}
+			for _, id := range []string{"gemini-pro-orchestrator", "gemini-pro-orchestrator-neon", "gemini-pro-orchestrator-argon"} {
+				if _, has := windows[id]; has {
+					t.Fatalf("agy's model windows name %s, whose pairing states no window", id)
+				}
+			}
+			if h.Session == nil || h.Session.Home != ".gemini/antigravity-cli" ||
+				h.Session.Glob != "brain/{session}/.system_generated/logs/transcript.jsonl" || h.Session.Index == nil ||
+				h.Session.Index.File != "cache/last_conversations.json" || h.Session.Index.Field != "." || h.Session.Index.At != "created_at" {
+				t.Fatalf("agy's session locator = %+v", h.Session)
+			}
+			if h.Model != nil {
+				t.Fatal("agy declares a model reader; the session keeps its group's configured model")
+			}
+			continue
+		}
 		if h.Context != nil {
 			t.Errorf("%s names a context source: %+v", h.Kind, h.Context)
 		}
@@ -1172,18 +1209,26 @@ func TestContextSource(t *testing.T) {
 	}
 }
 
-// A context source without a usage path, without the model source whose
+// A context source without a usage path, without a locator for the
 // session file it reads, or with an empty token field is refused, not
 // half read.
 func TestContextSourceChecked(t *testing.T) {
 	model := "model:\n  home: .x\n  glob: s/{session}.jsonl\n  field: m.model\n"
+	session := "session:\n  home: .x\n  glob: s/{session}.jsonl\n"
 	for name, body := range map[string]string{
-		"no usage":        "version: 1\nlabel: Q\n" + model + "context:\n  type: assistant\n",
-		"no model":        "version: 1\nlabel: Q\ncontext:\n  type: assistant\n  usage: message.usage\n",
-		"no field":        "version: 1\nlabel: Q\n" + model + "context:\n  type: assistant\n  usage: message.usage\n  tokens: [input_tokens, '']\n",
-		"negative window": "version: 1\nlabel: Q\n" + model + "context:\n  usage: message.usage\n  window: -1\n",
-		"two windows":     "version: 1\nlabel: Q\n" + model + "context:\n  usage: message.usage\n  window: 258400\n  window_field: info.window\n",
-		"empty key":       "version: 1\nlabel: Q\n" + model + "context:\n  usage: message.usage\n  window_field: info..window\n",
+		"no usage":              "version: 1\nlabel: Q\n" + model + "context:\n  type: assistant\n",
+		"no model":              "version: 1\nlabel: Q\ncontext:\n  type: assistant\n  usage: message.usage\n",
+		"no field":              "version: 1\nlabel: Q\n" + model + "context:\n  type: assistant\n  usage: message.usage\n  tokens: [input_tokens, '']\n",
+		"negative window":       "version: 1\nlabel: Q\n" + model + "context:\n  usage: message.usage\n  window: -1\n",
+		"two windows":           "version: 1\nlabel: Q\n" + model + "context:\n  usage: message.usage\n  window: 258400\n  window_field: info.window\n",
+		"empty key":             "version: 1\nlabel: Q\n" + model + "context:\n  usage: message.usage\n  window_field: info..window\n",
+		"model without windows": "version: 1\nlabel: Q\n" + session + "context:\n  usage: .\n  model_field: model\n",
+		"windows without model": "version: 1\nlabel: Q\n" + session + "context:\n  usage: .\n  model_windows: {x: 123456}\n",
+		"fixed and model window": "version: 1\nlabel: Q\n" + session +
+			"context:\n  usage: .\n  window: 123456\n  model_field: model\n  model_windows: {x: 123456}\n",
+		"nonpositive model window": "version: 1\nlabel: Q\n" + session + "context:\n  usage: .\n  model_field: model\n  model_windows: {x: 0}\n",
+		"reset on usage type":      "version: 1\nlabel: Q\n" + session + "context:\n  usage: .\n  type: reply\n  reset_type: reply\n",
+		"reset without type":       "version: 1\nlabel: Q\n" + session + "context:\n  usage: .\n  reset_type: done\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := load(t, map[string]string{"qwen.yaml": body}); err == nil {
@@ -1194,6 +1239,10 @@ func TestContextSourceChecked(t *testing.T) {
 	if _, err := load(t, map[string]string{"qwen.yaml": "version: 1\nlabel: Q\n" + model +
 		"context:\n  type: assistant\n  usage: message.usage\n"}); err != nil {
 		t.Fatalf("a whole source is refused: %v", err)
+	}
+	if _, err := load(t, map[string]string{"qwen.yaml": "version: 1\nlabel: Q\n" + session +
+		"context:\n  type: PLANNER_RESPONSE\n  usage: .\n"}); err != nil {
+		t.Fatalf("a source on a session locator is refused: %v", err)
 	}
 	if hs, err := load(t, map[string]string{"qwen.yaml": "version: 1\nlabel: Q\n" + model +
 		"context:\n  usage: message.usage\n  window: 123456\n"}); err != nil || hs[0].Context.Window != 123456 {

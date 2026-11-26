@@ -17,31 +17,38 @@ func (s ContextSource) tokens() []string {
 
 // UsageIn is the context use one line holds; ReadIn also reads its window.
 func (s ContextSource) UsageIn(line []byte) (used int, ok bool) {
-	used, _, ok, _ = s.ReadIn(line)
+	used, _, ok, _, _ = s.ReadIn(line)
 	return used, ok
 }
 
-// ReadIn reads the context use and declared window from one session line.
-// A missing WindowField gives a zero window, so no percentage can be read yet.
-// A present invalid window is an error; without WindowField, zero uses the model.
+// ReadIn reads the context use and window from one session line, or reports
+// a reset that invalidates the previous reading. A declared window or model
+// field that cannot supply a window gives zero, so no percentage can be read.
+// A Usage of "." reads the counts from the line itself.
 // A reading of 0 is no reading: a request never sends nothing, so all-zero
 // usage means the turn errored, not that the session emptied.
-func (s ContextSource) ReadIn(line []byte) (used, window int, ok bool, err error) {
+func (s ContextSource) ReadIn(line []byte) (used, window int, ok, reset bool, err error) {
 	var v map[string]any
 	if json.Unmarshal(line, &v) != nil {
-		return 0, 0, false, nil
+		return 0, 0, false, false, nil
 	}
 	key := s.TypeField
 	if key == "" {
 		key = "type"
 	}
-	if t, _ := valueAt(v, key).(string); s.Type != "" && t != s.Type {
-		return 0, 0, false, nil
+	t, _ := valueAt(v, key).(string)
+	if s.ResetType != "" && t == s.ResetType {
+		return 0, 0, false, true, nil
+	}
+	if s.Type != "" && t != s.Type {
+		return 0, 0, false, false, nil
 	}
 	u := v
-	for _, k := range strings.Split(s.Usage, ".") {
-		if u, _ = u[k].(map[string]any); u == nil {
-			return 0, 0, false, nil
+	if s.Usage != "." {
+		for _, k := range strings.Split(s.Usage, ".") {
+			if u, _ = u[k].(map[string]any); u == nil {
+				return 0, 0, false, false, nil
+			}
 		}
 	}
 	for _, k := range s.tokens() {
@@ -53,19 +60,27 @@ func (s ContextSource) ReadIn(line []byte) (used, window int, ok bool, err error
 		// No token field, or every one present reads 0: an errored turn
 		// carries no use, and the caller keeps its earlier reading. This
 		// sits before the window read, as a zero line carries no window.
-		return 0, 0, false, nil
+		return 0, 0, false, false, nil
 	}
 	window = s.Window
 	if s.WindowField != "" {
 		raw := valueAt(v, s.WindowField)
 		if raw == nil {
-			return used, 0, true, nil
+			return used, 0, true, false, nil
 		}
 		n, is := raw.(float64)
 		if !is || n <= 0 || n != math.Trunc(n) || n >= float64(int(^uint(0)>>1)) {
-			return 0, 0, false, fmt.Errorf("context: %s must be a positive integer", s.WindowField)
+			return 0, 0, false, false, fmt.Errorf("context: %s must be a positive integer", s.WindowField)
 		}
 		window = int(n)
 	}
-	return used, window, true, nil
+	if s.ModelField != "" {
+		raw := valueAt(v, s.ModelField)
+		model, is := raw.(string)
+		if raw != nil && !is {
+			return 0, 0, false, false, fmt.Errorf("context: %s must be a model id", s.ModelField)
+		}
+		window = s.ModelWindows[model]
+	}
+	return used, window, true, false, nil
 }
