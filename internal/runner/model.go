@@ -63,16 +63,17 @@ func (h *Herdr) Model(ctx context.Context, handle map[string]any, startedAt time
 // SessionID is the session id of the agent handle names, by which its own
 // session file is found: what herdr reports for the pane, or, when herdr
 // names no id and the kind declares a workspace, the worktree match's
-// (matchWorkspace), or, when its session locator names an index, the
-// index's id for the verified crew directory (indexSession). "" while
-// there is none: the agent has not started its session, is gone, or its
-// file matches nothing yet. It is where Model and Context start, without
-// their reading of the file, so an agent that has not answered yet, or
-// whose kind names no model, has its id all the same.
+// (matchWorkspace). An indexed crew session answers its launch's verified
+// conversation instead (indexSession), whatever herdr reports: a pane may
+// resume another launch's conversation. "" while there is none: the agent
+// has not started its session, is gone, or its file matches nothing yet.
+// It is where Model and Context start, without their reading of the file,
+// so an agent that has not answered yet, or whose kind names no model,
+// has its id all the same.
 func (h *Herdr) SessionID(ctx context.Context, handle map[string]any, startedAt time.Time) (string, error) {
 	kind, id, err := h.sessionKind(ctx, handle)
-	if err != nil || id != "" {
-		return id, err
+	if err != nil {
+		return "", err
 	}
 	if kind.Kind == "" {
 		if name, _ := handle[harnessKind].(string); name != "" {
@@ -80,19 +81,28 @@ func (h *Herdr) SessionID(ctx context.Context, handle map[string]any, startedAt 
 		}
 	}
 	if src := kind.SessionFile(); src != nil && src.Index != nil {
-		dir, _ := handle["dir"].(string)
-		launch, _ := handle[launchReference].(string)
-		prompt, _ := handle[firstPrompt].(string)
-		if dir == "" || launch == "" || !strings.Contains(prompt, crewSessionReference(launch)) {
-			return "", nil
+		if dir, _ := handle["dir"].(string); dir != "" {
+			// An indexed crew session pins only its launch's own
+			// conversation, verified by its first prompt; what herdr
+			// reports for the pane is never pinned unverified.
+			launch, _ := handle[launchReference].(string)
+			prompt, _ := handle[firstPrompt].(string)
+			if launch == "" || !strings.Contains(prompt, crewSessionReference(launch)) {
+				return "", nil
+			}
+			// agy can log the first prompt before the dispatcher records the start.
+			text, _ := handle[contextStartedAt].(string)
+			launchAt, err := time.Parse(time.RFC3339Nano, text)
+			if err != nil {
+				return "", fmt.Errorf("session index: invalid crew launch timestamp")
+			}
+			return h.indexSession(kind, handle, dir, launchAt, prompt)
 		}
-		// agy can log the first prompt before the dispatcher records the start.
-		text, _ := handle[contextStartedAt].(string)
-		launchAt, err := time.Parse(time.RFC3339Nano, text)
-		if err != nil {
-			return "", fmt.Errorf("session index: invalid crew launch timestamp")
-		}
-		return h.indexSession(kind, handle, dir, launchAt, prompt)
+		// An ordinary bead session of an indexed kind keeps upstream's
+		// answer: what herdr reports, else the worktree match.
+	}
+	if id != "" {
+		return id, nil
 	}
 	_, id, err = h.matchSession(kind, handle, startedAt, 0)
 	return id, err

@@ -12,9 +12,10 @@ import (
 
 // An indexed session locator pins the conversation a crew session owns:
 // its directory key and its launch's first prompt, since several panes
-// can share the directory. A transcript that started before the launch is
-// an earlier session's record, never a match, and an index that names no
-// plain id is an error, never a guess. A bead's worktree pins nothing.
+// can share the directory. What herdr reports for the pane never pins one
+// unverified. A transcript that started before the launch is an earlier
+// session's record, never a match, and an index that names no plain id is
+// an error, never a guess. A bead's worktree pins nothing.
 func TestHerdrSessionIDIndexed(t *testing.T) {
 	ctx := context.Background()
 	launch := time.Date(2026, 11, 24, 10, 41, 0, 0, time.UTC)
@@ -98,7 +99,7 @@ func TestHerdrSessionIDIndexed(t *testing.T) {
 			t.Fatalf("session = %q, %v; want a plain id error without the file's text", id, err)
 		}
 	})
-	t.Run("herdr id wins over the index", func(t *testing.T) {
+	t.Run("bead herdr id wins over the index", func(t *testing.T) {
 		h := &Herdr{Bin: fakeHerdrBin(t, `echo '{"result":{"agent":{"agent":"agy","agent_session":{"kind":"id","value":"named"},"agent_status":"idle"}}}'`)}
 		id, err := h.SessionID(ctx, map[string]any{"agent": "crew", "kind": "agy", "worktree": "/work/bead"}, launch)
 		if id != "named" || err != nil {
@@ -117,14 +118,36 @@ func TestHerdrSessionIDIndexed(t *testing.T) {
 			t.Fatalf("session = %q, %v; want own, nil", id, err)
 		}
 	})
-	t.Run("crew without a reference pins nothing", func(t *testing.T) {
-		h := &Herdr{AgentHomes: map[string]string{"agy": home(t, `{"/work/crew":"own"}`, map[string]string{"own": own})}}
+	t.Run("crew verifies past a reported id", func(t *testing.T) {
+		otherPrompt := strings.Replace(prompt, "7f3a9c1e5b2d4a68", "a-different-launch", 1)
+		other := first(launch.Add(time.Second), wrapped(otherPrompt))
+		h := &Herdr{
+			AgentHomes: map[string]string{"agy": home(t, `{"/work/crew":"other"}`, map[string]string{"other": other, "own": own})},
+			Bin:        fakeHerdrBin(t, `echo '{"result":{"agent":{"agent":"agy","agent_session":{"kind":"id","value":"other"},"agent_status":"idle"}}}'`),
+		}
 		handle := crew("/work/crew")
+		handle["agent"] = "crew"
+		if id, err := askCrew(t, h, handle); id != "" || err != nil {
+			t.Fatalf("reported conversation of another launch = %q, %v; want \"\", nil", id, err)
+		}
+		h.AgentHomes["agy"] = home(t, `{"/work/crew":"own"}`, map[string]string{"other": other, "own": own})
+		if id, err := askCrew(t, h, handle); id != "own" || err != nil {
+			t.Fatalf("session = %q, %v; want own, nil", id, err)
+		}
+	})
+	t.Run("crew without a reference pins nothing", func(t *testing.T) {
+		h := &Herdr{
+			AgentHomes: map[string]string{"agy": home(t, `{"/work/crew":"own"}`, map[string]string{"own": own})},
+			Bin:        fakeHerdrBin(t, `echo '{"result":{"agent":{"agent":"agy","agent_session":{"kind":"id","value":"own"},"agent_status":"idle"}}}'`),
+		}
+		handle := crew("/work/crew")
+		handle["agent"] = "crew"
 		delete(handle, launchReference)
 		if id, err := askCrew(t, h, handle); id != "" || err != nil {
 			t.Fatalf("session = %q, %v; want \"\", nil", id, err)
 		}
 		handle = crew("/work/crew")
+		handle["agent"] = "crew"
 		handle[firstPrompt] = "You are the yardr crew member \"yardmaster\"."
 		if id, err := askCrew(t, h, handle); id != "" || err != nil {
 			t.Fatalf("session = %q, %v; want \"\", nil", id, err)
