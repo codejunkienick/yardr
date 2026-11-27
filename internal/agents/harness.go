@@ -97,11 +97,14 @@ func IsErrorLine(kind, raw, said string) bool {
 
 var (
 	// httpStatusKeyword matches an HTTP 4xx/5xx code introduced by "http" or "status".
-	httpStatusKeyword = regexp.MustCompile(`(?i)\b(?:http(?:[\s_-]*status(?:[\s_-]*code)?|/\d+(?:\.\d+)?)?|status(?:[\s_-]*code)?)\s*[:=]?\s*([45]\d\d)\b`)
+	// Group 6 is the status code.
+	httpStatusKeyword = regexp.MustCompile(`(?i)\b(http([\s_-]*status([\s_-]*code)?|/\d+(\.\d+)?)?|status([\s_-]*code)?)\s*[:=]?\s*([45]\d\d)\b`)
 	// httpStatusPhrase matches a 4xx/5xx code paired with a standard or provider HTTP reason phrase.
-	httpStatusPhrase = regexp.MustCompile(`(?i)\b([45]\d\d)\s+(?:Bad\s+Request|Unauthorized|Payment\s+Required|Forbidden|Not\s+Found|Method\s+Not\s+Allowed|Not\s+Acceptable|Proxy\s+Authentication|Request\s+Timeout|Conflict|Gone|Length\s+Required|Precondition|Payload\s+Too\s+Large|Content\s+Too\s+Large|Request\s+Entity|URI\s+Too\s+Long|Unsupported\s+Media|Range\s+Not|Expectation\s+Failed|Misdirected|Unprocessable|Locked|Failed\s+Dependency|Too\s+Early|Upgrade\s+Required|Too\s+Many\s+Requests|Request\s+Header|Unavailable\s+For\s+Legal|Internal\s+(?:Server\s+)?Error|Not\s+Implemented|Service\s+Unavailable|HTTP\s+Version|Variant\s+Also|Insufficient\s+Storage|Loop\s+Detected|Not\s+Extended|Network\s+Authentication|Overloaded)\b`)
+	// Group 1 is the status code.
+	httpStatusPhrase = regexp.MustCompile(`(?i)\b([45]\d\d)\s+(Bad\s+Request|Unauthorized|Payment\s+Required|Forbidden|Not\s+Found|Method\s+Not\s+Allowed|Not\s+Acceptable|Proxy\s+Authentication|Request\s+Timeout|Conflict|Gone|Length\s+Required|Precondition|Payload\s+Too\s+Large|Content\s+Too\s+Large|Request\s+Entity|URI\s+Too\s+Long|Unsupported\s+Media|Range\s+Not|Expectation\s+Failed|Misdirected|Unprocessable|Locked|Failed\s+Dependency|Too\s+Early|Upgrade\s+Required|Too\s+Many\s+Requests|Request\s+Header|Unavailable\s+For\s+Legal|Internal\s+(Server\s+)?Error|Not\s+Implemented|Service\s+Unavailable|HTTP\s+Version|Variant\s+Also|Insufficient\s+Storage|Loop\s+Detected|Not\s+Extended|Network\s+Authentication|Overloaded)\b`)
 	// httpStatusLead matches a 4xx/5xx code at the start of an error payload.
-	httpStatusLead = regexp.MustCompile(`(?i)(?:^|(?:error|failed|attempts|status)\s*:\s*|\]\s+)([45]\d\d)(?:$|[:,\s({[\]])`)
+	// Group 3 is the status code.
+	httpStatusLead = regexp.MustCompile(`(?i)(^|(error|failed|attempts|status)\s*:\s*|\]\s+)([45]\d\d)($|[:,\s({[\]])`)
 )
 
 var nonStatusUnits = map[string]bool{
@@ -118,19 +121,22 @@ var nonStatusUnits = map[string]bool{
 // 4xx/5xx HTTP status other than 502 or 504, so lines like 503/529/429 keep
 // their own status reason or `other` even when transport words follow.
 func HasNonGatewayHTTPStatus(said string) bool {
-	for _, re := range []*regexp.Regexp{httpStatusKeyword, httpStatusPhrase} {
-		for _, m := range re.FindAllStringSubmatch(said, -1) {
-			if m[1] != "502" && m[1] != "504" {
-				return true
-			}
+	for _, m := range httpStatusKeyword.FindAllStringSubmatch(said, -1) {
+		if m[6] != "502" && m[6] != "504" {
+			return true
+		}
+	}
+	for _, m := range httpStatusPhrase.FindAllStringSubmatch(said, -1) {
+		if m[1] != "502" && m[1] != "504" {
+			return true
 		}
 	}
 	for _, loc := range httpStatusLead.FindAllStringSubmatchIndex(said, -1) {
-		code := said[loc[2]:loc[3]]
+		code := said[loc[6]:loc[7]]
 		if code == "502" || code == "504" {
 			continue
 		}
-		if rest := strings.TrimLeft(said[loc[3]:], " \t"); rest != "" {
+		if rest := strings.TrimLeft(said[loc[7]:], " \t"); rest != "" {
 			word := strings.ToLower(strings.Fields(rest)[0])
 			word = strings.TrimRight(word, ".,;:!?)]}")
 			if nonStatusUnits[word] {

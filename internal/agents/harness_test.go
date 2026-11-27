@@ -113,9 +113,13 @@ func TestHarnessFiles(t *testing.T) {
 		{"Error: 429 Too Many Requests: connection reset", true},
 		{"API Error: 500 {\"type\":\"error\",\"message\":\"connection error\"}", true},
 		{"Error: HTTP/1.1 403 Forbidden: connection refused", true},
+		{"Error: HTTP status code 503: connection reset", true},
+		{"Request failed with 500 Internal Server Error: connection reset", true},
 		{"exceeded retry limit, last status: 502 Bad Gateway", false},
 		{"unexpected status 504 Gateway Timeout", false},
 		{"Error: Retry failed after 3 attempts: 504 Gateway Time-out", false},
+		{"Error: HTTP status code 502: connection reset", false},
+		{"Error 502 Service Unavailable", false},
 		{"Error: connect ECONNREFUSED 127.0.0.1:443", false},
 		{"Error: 500 ms timeout: ETIMEDOUT", false},
 	} {
